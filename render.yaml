@@ -1,0 +1,28 @@
+# Blueprint اختياري: Render ← New ← Blueprint ← يقرأ هذا الملف وينشئ الخدمة.
+# أو أنشئ الخدمة يدوياً بنفس القيم (انظر README).
+services:
+  - type: web
+    name: promo-bot
+    runtime: python
+    plan: free
+    region: frankfurt
+    buildCommand: pip install -r requirements.txt
+    startCommand: python -m app.main
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: MODE
+        value: webhook
+      - key: TZ
+        value: Asia/Damascus
+      - key: NOUR_DRY_RUN
+        value: "1"
+      - key: BOT_TOKEN
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+      - key: ADMIN_IDS
+        sync: false
+      - key: WEBHOOK_SECRET
+        generateValue: true
+      # PUBLIC_URL غير مطلوب: Render يوفّر RENDER_EXTERNAL_URL تلقائياً ونقرؤه
