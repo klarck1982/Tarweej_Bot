@@ -28,15 +28,17 @@ async def topup_card_text(tid: int) -> tuple[str, dict]:
     row = await topups_repo.get(tid)
     if row is None:
         return "", {}
-    methods = await settings_repo.get("payment_methods", {}) or {}
-    m_title = methods.get(row["method"], {}).get("title", row["method"])
+    from app.services import payments as PM  # استيراد متأخر (payments يستورد settings_repo فقط)
+    m = (await PM.get_methods()).get(row["method"], {"title": row["method"]})
+    m_title = m.get("title", row["method"])
     approved_count = await db.fetchval(
         "SELECT count(*) FROM topups WHERE user_id = $1 AND status = 'approved'", row["user_id"]
     )
     uname = f"@{row['user_username']}" if row["user_username"] else ""
     text = T.ADMIN_TOPUP_CARD.format(
         id=tid, name=esc(row["user_name"]), username=esc(uname), uid=row["user_id"],
-        amount=fmt(row["amount_usd"]), method=esc(m_title), tx=esc(row["proof_text"]) or "—",
+        amount=PM.pay_amount(m, row["amount_usd"]) if m.get("currency") != "SYP" else fmt(row["amount_usd"]),
+        method=esc(m_title), local=PM.local_note(m, dict(row)), tx=esc(row["proof_text"]) or "—",
         balance=fmt(row["user_balance"]), approved_count=approved_count,
         when=row["created_at"].astimezone(TZ).strftime("%d/%m %H:%M"),
     )

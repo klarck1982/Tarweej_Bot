@@ -71,7 +71,7 @@ git push -u origin main
    INFO db: Postgres pool ready
    INFO db: migration applied: 001_init.sql
    INFO main: webhook set: https://promo-bot.onrender.com/webhook/...
-   INFO main: bot @اسم_البوت started — v0.2.1 step 1/6 mode=webhook
+   INFO main: bot @اسم_البوت started — v0.2.3 step 1/6 mode=webhook
    ```
 5. ستصلك رسالة على تيليغرام من البوت: **«✅ روّج بوت انطلق»** ← افتح البوت واضغط **Start** 🎉
    (إذا لم تصل الرسالة الأولى: اضغط Start في البوت أولاً ثم أعد النشر — تيليغرام لا يسمح للبوت بمراسلتك قبل أن تراسله.)
@@ -171,7 +171,7 @@ promo-bot/
 <p align="center"><sub>صُمِّم وبُني بإبداع مع <b>Arena.ai</b> ✨</sub></p>
 
 
-## 🆕 ما الجديد في الخطوة 2 (v0.2.1) — الرصيد والشحن
+## 🆕 ما الجديد في الخطوة 2 (v0.2.3) — الرصيد والشحن
 
 - 💰 **رصيدي**: الرصيد الحالي + آخر عملية + سجل العمليات (صفحات).
 - ➕ **شحن رصيد بـ USDT** على شبكتي **TRC20** و **BEP20** فقط — الحد الأدنى 5$.

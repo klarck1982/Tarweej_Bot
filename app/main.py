@@ -24,6 +24,7 @@ from app import STEP, VERSION
 from app.bot import texts as T
 from app.bot.fsm_storage import PostgresStorage
 from app.bot.handlers import fallback, menu, start, topup
+from app.bot.wide import WideButtonsMiddleware
 from app.bot.handlers.admin import panel as admin_panel
 from app.bot.handlers.admin import topups as admin_topups
 from app.bot.middlewares import ErrorsMiddleware, UserMiddleware
@@ -99,6 +100,7 @@ async def run() -> None:
     migrations = await db.run_migrations()
 
     bot = Bot(settings.bot_token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
+    bot.session.middleware(WideButtonsMiddleware())  # أزرار بعرض الشاشة (انظر app/bot/wide.py)
     dp = build_dispatcher()
     app = make_app()
     try:

@@ -6,8 +6,8 @@
 
 from __future__ import annotations
 
-import re
 from decimal import Decimal, InvalidOperation
+from zoneinfo import ZoneInfo
 
 from aiogram import F, Router
 from aiogram.filters import Command
@@ -16,17 +16,19 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import CallbackQuery, Message
 
 from app.bot import keyboards as K
+from app.config import settings as app_settings
 from app.bot import texts as T
 from app.db import pool as db
 from app.db.repo import events, settings as settings_repo, topups as topups_repo, users as users_repo
+from app.services import payments as PM
 from app.services.notify import notify_admins_topup
 from app.services.pricing import fmt, money
 
 router = Router(name="topup")
+TZ = ZoneInfo(app_settings.tz)
 
 TOPUP_MAX = Decimal("1000")
 LEDGER_KINDS = {"topup": "شحن", "order_charge": "طلب", "refund": "استرداد", "referral": "إحالة", "adjustment": "تعديل"}
-_TX_RE = re.compile(r"^[0-9a-zA-Z]{20,128}$")
 
 
 class Topup(StatesGroup):
@@ -43,7 +45,7 @@ async def balance_view(uid: int) -> tuple[str, object]:
     )
     if last:
         sign = "+" if last["amount_usd"] > 0 else "−"
-        last_txt = f"آخر عملية: {LEDGER_KINDS.get(last['type'], last['type'])} {sign}{fmt(abs(last['amount_usd']))} — {last['created_at']:%d/%m %H:%M}"
+        last_txt = f"آخر عملية: {LEDGER_KINDS.get(last['type'], last['type'])} {sign}{fmt(abs(last['amount_usd']))} — {last['created_at'].astimezone(TZ):%d/%m %H:%M}"
     else:
         last_txt = T.BALANCE_NO_TX
     text = T.BALANCE.format(balance=fmt(balance), last=last_txt)
@@ -78,28 +80,29 @@ async def cb_balance(cb: CallbackQuery, state: FSMContext) -> None:
 @router.callback_query(F.data == "bal:topup")
 async def cb_topup(cb: CallbackQuery, state: FSMContext) -> None:
     await state.clear()
-    methods = await settings_repo.get("payment_methods", {}) or {}
-    usable = {c: m for c, m in methods.items() if m.get("enabled") and m.get("address")}
+    usable = await PM.usable_methods()
     if not usable:
         await cb.message.answer(T.TOPUP_NO_METHODS, reply_markup=K.home_only())
         await cb.answer()
         return
     await events.log_event("topup_start", cb.from_user.id)
     try:
-        await cb.message.edit_text(T.TOPUP_METHOD, reply_markup=K.topup_methods(methods))
+        await cb.message.edit_text(T.TOPUP_METHOD, reply_markup=K.topup_methods(usable))
     except Exception:  # noqa: BLE001 — قادم من رسالة بلا نص قابل للتعديل
-        await cb.message.answer(T.TOPUP_METHOD, reply_markup=K.topup_methods(methods))
+        await cb.message.answer(T.TOPUP_METHOD, reply_markup=K.topup_methods(usable))
     await cb.answer()
 
 
 # ───────────── B2 المبلغ ─────────────
 
 async def _amount_screen(uid: int, method_code: str, state: FSMContext) -> tuple[str, object]:
-    methods = await settings_repo.get("payment_methods", {}) or {}
+    methods = await PM.get_methods()
     m = methods.get(method_code)
     min_usd = Decimal(str(await settings_repo.get("min_topup_usd", 5)))
     presets = await settings_repo.get("topup_presets_usd", [5, 10, 20, 50, 100])
-    text = T.TOPUP_AMOUNT.format(method=m["title"], min=fmt(min_usd))
+    text = T.TOPUP_AMOUNT.format(method=PM.label(m), min=fmt(min_usd))
+    if PM.needs_rate(m):
+        text += T.TOPUP_AMOUNT_SYP_NOTE.format(rate=PM.fmt_rate(await PM.syp_rate()))
     suggested = None
     data = await state.get_data()
     gap = data.get("gap_usd")
@@ -112,8 +115,8 @@ async def _amount_screen(uid: int, method_code: str, state: FSMContext) -> tuple
 @router.callback_query(F.data.startswith("bal:m:"))
 async def cb_method(cb: CallbackQuery, state: FSMContext) -> None:
     code = cb.data.split(":")[2]
-    methods = await settings_repo.get("payment_methods", {}) or {}
-    if code not in methods or not methods[code].get("address"):
+    usable = await PM.usable_methods()
+    if code not in usable:
         await cb.answer("هذه الطريقة غير متاحة الآن", show_alert=True)
         return
     await state.update_data(method=code)
@@ -123,25 +126,45 @@ async def cb_method(cb: CallbackQuery, state: FSMContext) -> None:
     await cb.answer()
 
 
+def instructions_for(row: dict, m: dict, sla: str) -> tuple[str, str]:
+    """نص التعليمات + عنوان زر النسخ، حسب نوع الطريقة."""
+    if m.get("kind") == "shamcash":
+        usd_hint = f" (= {fmt(row['amount_usd'])})" if m.get("currency") == "SYP" else ""
+        text = T.TOPUP_INSTRUCTIONS_SHAM.format(
+            id=row["id"], currency_name="ليرة سورية" if m.get("currency") == "SYP" else "دولار",
+            pay=PM.pay_amount(m, row["amount_usd"], row.get("amount_local")), usd_hint=usd_hint,
+            address=m.get("address") or "—", holder=m.get("holder") or "—", sla=sla,
+        )
+        return text, "📋 نسخ رقم الحساب"
+    text = T.TOPUP_INSTRUCTIONS.format(id=row["id"], amount=fmt(row["amount_usd"]), network=m.get("network", ""),
+                                       address=m.get("address") or "—", sla=sla)
+    return text, "📋 نسخ العنوان"
+
+
 async def _create_and_show(message: Message, uid: int, amount: Decimal, state: FSMContext, edit: bool) -> None:
     data = await state.get_data()
     code = data.get("method")
-    methods = await settings_repo.get("payment_methods", {}) or {}
-    m = methods.get(code)
-    if not m or not m.get("address"):
+    usable = await PM.usable_methods()
+    m = usable.get(code)
+    if not m:
         await message.answer(T.TOPUP_NO_METHODS, reply_markup=K.home_only())
         await state.clear()
         return
-    row = await topups_repo.create(uid, code, amount)
+    amount_local = rate = None
+    if PM.needs_rate(m):
+        rate = await PM.syp_rate()
+        amount_local = PM.syp_amount(amount, rate)
+    row = await topups_repo.create(uid, code, amount, amount_local=amount_local, rate=rate)
     await state.clear()
     sla = await settings_repo.get("topup_sla_text", "")
-    text = T.TOPUP_INSTRUCTIONS.format(id=row["id"], amount=fmt(amount), network=m["network"], address=m["address"], sla=sla)
-    kb = K.topup_instructions(row["id"], m["address"])
+    text, copy_label = instructions_for(dict(row), m, sla)
+    kb = K.topup_instructions(row["id"], m["address"], copy_label)
     if edit:
         await message.edit_text(text, reply_markup=kb)
     else:
         await message.answer(text, reply_markup=kb)
-    await events.log_event("topup_created", uid, topup_id=row["id"], amount=str(amount), method=code)
+    await events.log_event("topup_created", uid, topup_id=row["id"], amount=str(amount), method=code,
+                           amount_local=str(amount_local) if amount_local is not None else None)
 
 
 def _parse_amount(raw: str) -> Decimal | None:
@@ -196,14 +219,15 @@ async def cb_view(cb: CallbackQuery, state: FSMContext) -> None:
         await cb.answer("هذا الطلب حُسم بالفعل", show_alert=True)
         return
     await state.clear()
-    methods = await settings_repo.get("payment_methods", {}) or {}
-    m = methods.get(row["method"], {"network": row["method"], "address": "—"})
+    methods = await PM.get_methods()
+    m = methods.get(row["method"], {"kind": "crypto", "network": row["method"], "address": "—"})
     sla = await settings_repo.get("topup_sla_text", "")
-    text = T.TOPUP_INSTRUCTIONS.format(id=tid, amount=fmt(row["amount_usd"]), network=m["network"], address=m["address"], sla=sla)
+    text, copy_label = instructions_for(dict(row), m, sla)
+    kb = K.topup_instructions(tid, m.get("address") or "—", copy_label)
     try:
-        await cb.message.edit_text(text, reply_markup=K.topup_instructions(tid, m["address"]))
+        await cb.message.edit_text(text, reply_markup=kb)
     except Exception:  # noqa: BLE001
-        await cb.message.answer(text, reply_markup=K.topup_instructions(tid, m["address"]))
+        await cb.message.answer(text, reply_markup=kb)
     await cb.answer()
 
 
@@ -216,7 +240,9 @@ async def cb_paid(cb: CallbackQuery, state: FSMContext) -> None:
         return
     await state.set_state(Topup.proof)
     await state.update_data(topup_id=tid)
-    await cb.message.answer(T.TOPUP_PROOF.format(id=tid), reply_markup=K.topup_proof(tid))
+    m = (await PM.get_methods()).get(row["method"], {})
+    tmpl = T.TOPUP_PROOF_SHAM if m.get("kind") == "shamcash" else T.TOPUP_PROOF
+    await cb.message.answer(tmpl.format(id=tid), reply_markup=K.topup_proof(tid))
     await cb.answer()
 
 
@@ -238,22 +264,23 @@ async def msg_proof(message: Message, state: FSMContext) -> None:
         file_id = message.photo[-1].file_id
     elif message.document and (message.document.mime_type or "").startswith("image/"):
         file_id = message.document.file_id
-    elif message.text:
+    m = (await PM.get_methods()).get(row["method"], {})
+    invalid = T.TOPUP_PROOF_INVALID_SHAM if m.get("kind") == "shamcash" else T.TOPUP_PROOF_INVALID
+    if file_id is None and message.text:
         candidate = message.text.strip()
-        if _TX_RE.match(candidate):
+        if PM.proof_ok(m, candidate):
             tx = candidate
         else:
-            await message.answer(T.TOPUP_PROOF_INVALID)
+            await message.answer(invalid)
             return
-    else:
-        await message.answer(T.TOPUP_PROOF_INVALID)
+    elif file_id is None:
+        await message.answer(invalid)
         return
 
     await topups_repo.attach_proof(tid, file_id, tx)
     await state.clear()
     sla = await settings_repo.get("topup_sla_text", "")
-    methods = await settings_repo.get("payment_methods", {}) or {}
-    m_title = methods.get(row["method"], {}).get("title", row["method"])
+    m_title = (await PM.get_methods()).get(row["method"], {}).get("title", row["method"])
     sent = await message.answer(
         T.TOPUP_WAITING.format(id=tid, amount=fmt(row["amount_usd"]), method=m_title, sla=sla),
         reply_markup=K.topup_waiting(tid),
@@ -308,7 +335,7 @@ async def cb_history(cb: CallbackQuery) -> None:
     lines = [T.HISTORY_TITLE.format(page=page, pages=pages)]
     for r in rows:
         sign = "+" if r["amount_usd"] > 0 else "−"
-        lines.append(f"{sign}{fmt(abs(r['amount_usd']))}  {LEDGER_KINDS.get(r['type'], r['type'])} — {r['created_at']:%d/%m %H:%M}")
+        lines.append(f"{sign}{fmt(abs(r['amount_usd']))}  {LEDGER_KINDS.get(r['type'], r['type'])} — {r['created_at'].astimezone(TZ):%d/%m %H:%M}")
     balance = await users_repo.get_balance(cb.from_user.id)
     lines.append(f"\n💰 الرصيد الحالي: <b>{fmt(balance)}</b>")
     await cb.message.edit_text("\n".join(lines), reply_markup=K.history_nav(page, pages))

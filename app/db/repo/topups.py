@@ -16,8 +16,12 @@ async def get_pending_for_user(user_id: int):
     )
 
 
-async def create(user_id: int, method: str, amount_usd: Decimal):
-    """ينشئ طلب شحن معلّقاً. إن وُجد طلب معلّق سابق يُلغى تلقائياً (طلب واحد معلّق لكل مستخدم)."""
+async def create(user_id: int, method: str, amount_usd: Decimal,
+                 amount_local: Decimal | None = None, rate: Decimal | None = None):
+    """ينشئ طلب شحن معلّقاً. إن وُجد طلب معلّق سابق يُلغى تلقائياً (طلب واحد معلّق لكل مستخدم).
+
+    amount_local/rate: للطرق بالليرة السورية — المعادل وسعر الصرف لحظة الطلب (ثابتان مهما تغيّر السعر لاحقاً).
+    """
     async with db.pool().acquire() as c:
         async with c.transaction():
             await c.execute(
@@ -26,8 +30,9 @@ async def create(user_id: int, method: str, amount_usd: Decimal):
                 user_id,
             )
             return await c.fetchrow(
-                "INSERT INTO topups (user_id, method, amount_usd) VALUES ($1, $2, $3) RETURNING *",
-                user_id, method, money(amount_usd),
+                "INSERT INTO topups (user_id, method, amount_usd, amount_local, rate) "
+                "VALUES ($1, $2, $3, $4, $5) RETURNING *",
+                user_id, method, money(amount_usd), amount_local, rate,
             )
 
 

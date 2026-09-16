@@ -14,6 +14,7 @@ from app.bot import texts as T
 from app.config import settings
 from app.db.repo import events, settings as settings_repo, topups as topups_repo
 from app.services import notify
+from app.services import payments as PM
 from app.services.pricing import fmt, money
 
 router = Router(name="admin_topups")
@@ -26,6 +27,8 @@ class AdminTopup(StatesGroup):
     adjust_amount = State()
     message_user = State()
     wallet_address = State()
+    wallet_holder = State()
+    syp_rate = State()
 
 
 # ───────────── القائمة ─────────────
@@ -35,9 +38,9 @@ async def _list_view() -> tuple[str, object]:
     if not rows:
         return T.ADMIN_TOPUP_LIST_EMPTY, K.admin_back()
     data = []
-    methods = await settings_repo.get("payment_methods", {}) or {}
+    methods = await PM.get_methods()
     for r in rows:
-        net = methods.get(r["method"], {}).get("network", r["method"])
+        net = methods.get(r["method"], {}).get("short", r["method"])
         proof = "📷" if r["proof_file_id"] else ("🔖" if r["proof_text"] else "⏳")
         data.append((r["id"], f"{proof} #TOP-{r['id']} · {fmt(r['amount_usd'])} {net} · {r['user_name'][:18]}"))
     return T.ADMIN_TOPUP_LIST.format(n=len(rows)), K.admin_topup_list(data)
@@ -239,16 +242,21 @@ async def msg_message_user(message: Message, state: FSMContext) -> None:
         await message.answer(f"تعذّر الإرسال: {e}")
 
 
-# ───────────── A5: طرق الدفع والعناوين ─────────────
+# ───────────── A5: طرق الدفع والحسابات + سعر الصرف ─────────────
+
+def _addr_html(m: dict) -> str:
+    if not m.get("address"):
+        return "<i>لم يُدخل بعد</i>"
+    extra = f" — {notify.esc(m['holder'])}" if m.get("kind") == "shamcash" and m.get("holder") else ""
+    return f"<code>{notify.esc(m['address'])}</code>{extra}"
+
 
 async def _wallets_view() -> tuple[str, object]:
-    methods = await settings_repo.get("payment_methods", {}) or {}
-    rows = []
-    for code, m in methods.items():
-        state = "🟢 فعّالة" if (m.get("enabled") and m.get("address")) else ("🟡 بلا عنوان" if m.get("enabled") else "🔴 متوقفة")
-        addr = f"<code>{notify.esc(m.get('address'))}</code>" if m.get("address") else "<i>لم يُدخل بعد</i>"
-        rows.append(f"• <b>{notify.esc(m['title'])}</b> — {state}\n  {addr}")
-    return T.ADMIN_WALLETS.format(rows="\n".join(rows)), K.admin_wallets(methods)
+    methods = await PM.get_methods()
+    rate = await PM.syp_rate()
+    rows = [f"• <b>{notify.esc(m['title'])}</b> — {PM.status_text(m, rate)}\n  {_addr_html(m)}" for m in methods.values()]
+    rate_txt = f"1$ = {PM.fmt_rate(rate)} ل.س" if rate > 0 else "<i>غير مضبوط — طريقة الليرة مخفية</i>"
+    return T.ADMIN_WALLETS.format(rows="\n".join(rows), rate=rate_txt), K.admin_wallets(methods, rate)
 
 
 @router.callback_query(F.data == "adm:wallets")
@@ -262,46 +270,75 @@ async def cb_wallets(cb: CallbackQuery, state: FSMContext) -> None:
     await cb.answer()
 
 
+async def _wallet_detail(code: str) -> tuple[str, object] | None:
+    methods = await PM.get_methods()
+    m = methods.get(code)
+    if not m:
+        return None
+    rate = await PM.syp_rate()
+    lines = [f"🏦 <b>{notify.esc(m['title'])}</b>"]
+    if m.get("kind") == "shamcash":
+        lines.append(f"رقم الحساب: {'<code>' + notify.esc(m['address']) + '</code>' if m.get('address') else '<i>لم يُدخل بعد</i>'}")
+        lines.append(f"اسم صاحب الحساب: {notify.esc(m['holder']) if m.get('holder') else '<i>لم يُدخل بعد</i>'}")
+        if m.get("currency") == "SYP":
+            lines.append(f"سعر الصرف: {('1$ = ' + PM.fmt_rate(rate) + ' ل.س') if rate > 0 else '<i>غير مضبوط</i>'}")
+    else:
+        lines.append(f"الشبكة: {m.get('network', '')}")
+        lines.append(f"العنوان الحالي: {'<code>' + notify.esc(m['address']) + '</code>' if m.get('address') else '<i>لم يُدخل بعد</i>'}")
+    lines.append(f"الحالة: {PM.status_text(m, rate)}")
+    return "\n".join(lines), K.admin_wallet_edit(code, m)
+
+
 @router.callback_query(F.data.regexp(r"^adm:wal:(\w+)$"))
 async def cb_wallet(cb: CallbackQuery) -> None:
     code = cb.data.split(":")[2]
-    methods = await settings_repo.get("payment_methods", {}) or {}
-    m = methods.get(code)
-    if not m:
+    view = await _wallet_detail(code)
+    if not view:
         await cb.answer()
         return
-    addr = f"<code>{notify.esc(m.get('address'))}</code>" if m.get("address") else "<i>لم يُدخل بعد</i>"
-    await cb.message.edit_text(
-        f"🏦 <b>{notify.esc(m['title'])}</b>\nالشبكة: {m['network']}\nالعنوان الحالي: {addr}\nالحالة: {'🟢 مفعّلة' if m.get('enabled') else '🔴 متوقفة'}",
-        reply_markup=K.admin_wallet_edit(code, bool(m.get("enabled"))),
-    )
+    try:
+        await cb.message.edit_text(view[0], reply_markup=view[1])
+    except Exception:  # noqa: BLE001
+        await cb.message.answer(view[0], reply_markup=view[1])
     await cb.answer()
 
 
 @router.callback_query(F.data.regexp(r"^adm:wal:(\w+):toggle$"))
 async def cb_wallet_toggle(cb: CallbackQuery) -> None:
     code = cb.data.split(":")[2]
-    methods = await settings_repo.get("payment_methods", {}) or {}
+    methods = await PM.get_methods()
     if code in methods:
         methods[code]["enabled"] = not methods[code].get("enabled", False)
-        await settings_repo.set_("payment_methods", methods)
+        await PM.save_methods(methods)
         await cb.answer("تم التفعيل 🟢" if methods[code]["enabled"] else "تم الإيقاف 🔴")
     cb.data = f"adm:wal:{code}"
     await cb_wallet(cb)
 
 
-@router.callback_query(F.data.regexp(r"^adm:wal:(\w+):edit$"))
+@router.callback_query(F.data.regexp(r"^adm:wal:(\w+):(edit|holder)$"))
 async def cb_wallet_edit(cb: CallbackQuery, state: FSMContext) -> None:
-    code = cb.data.split(":")[2]
-    methods = await settings_repo.get("payment_methods", {}) or {}
-    if code not in methods:
+    _, _, code, what = cb.data.split(":")
+    methods = await PM.get_methods()
+    m = methods.get(code)
+    if not m:
         await cb.answer()
         return
-    await state.set_state(AdminTopup.wallet_address)
     await state.update_data(code=code)
-    await cb.message.answer(T.ADMIN_WALLET_EDIT.format(title=notify.esc(methods[code]["title"])),
-                            reply_markup=K.cancel_input("adm:wallets"))
+    title = notify.esc(m["title"])
+    if what == "holder":
+        await state.set_state(AdminTopup.wallet_holder)
+        prompt = T.ADMIN_WALLET_HOLDER
+    else:
+        await state.set_state(AdminTopup.wallet_address)
+        prompt = (T.ADMIN_WALLET_EDIT_SHAM if m.get("kind") == "shamcash" else T.ADMIN_WALLET_EDIT).format(title=title)
+    await cb.message.answer(prompt, reply_markup=K.cancel_input(f"adm:wal:{code}"))
     await cb.answer()
+
+
+async def _after_wallet_save(message: Message, code: str) -> None:
+    view = await _wallet_detail(code)
+    if view:
+        await message.answer(view[0], reply_markup=view[1])
 
 
 @router.message(AdminTopup.wallet_address, F.text)
@@ -309,18 +346,80 @@ async def msg_wallet_address(message: Message, state: FSMContext) -> None:
     if message.text.startswith("/") or message.text in T.MAIN_BUTTONS:
         await state.clear()
         return
-    addr = message.text.strip()
-    if not (20 <= len(addr) <= 120) or " " in addr:
-        await message.answer("العنوان مو واضح — انسخه كاملاً من محفظتك بلا مسافات.")
+    data = await state.get_data()
+    code = data.get("code")
+    methods = await PM.get_methods()
+    m = methods.get(code)
+    if not m:
+        await state.clear()
+        return
+    addr = PM.clean_address(m, message.text)
+    if not addr:
+        hint = "رقم الحساب مو واضح — أرسله أرقاماً/أحرفاً بلا مسافات." if m.get("kind") == "shamcash" \
+            else "العنوان مو واضح — انسخه كاملاً من محفظتك بلا مسافات."
+        await message.answer(hint)
+        return
+    await state.clear()
+    methods[code]["address"] = addr
+    await PM.save_methods(methods)
+    await events.log_event("wallet_updated", message.from_user.id, method=code)
+    await message.answer(T.ADMIN_WALLET_SAVED.format(title=notify.esc(m["title"]), address=notify.esc(addr)))
+    if m.get("kind") == "shamcash" and not m.get("holder"):
+        # نكمل مباشرة باسم صاحب الحساب — خطوة واحدة أقل على الأدمن
+        await state.set_state(AdminTopup.wallet_holder)
+        await state.update_data(code=code)
+        await message.answer(T.ADMIN_WALLET_HOLDER, reply_markup=K.cancel_input(f"adm:wal:{code}"))
+        return
+    await _after_wallet_save(message, code)
+
+
+@router.message(AdminTopup.wallet_holder, F.text)
+async def msg_wallet_holder(message: Message, state: FSMContext) -> None:
+    if message.text.startswith("/") or message.text in T.MAIN_BUTTONS:
+        await state.clear()
+        return
+    holder = " ".join(message.text.split())
+    if not (2 <= len(holder) <= 60):
+        await message.answer("اكتب الاسم كما يظهر في شام كاش (2–60 حرفاً).")
         return
     data = await state.get_data()
-    code = data["code"]
+    code = data.get("code")
     await state.clear()
-    methods = await settings_repo.get("payment_methods", {}) or {}
+    methods = await PM.get_methods()
     if code not in methods:
         return
-    methods[code]["address"] = addr
-    await settings_repo.set_("payment_methods", methods)
-    await events.log_event("wallet_updated", message.from_user.id, method=code)
-    await message.answer(T.ADMIN_WALLET_SAVED.format(title=notify.esc(methods[code]["title"]), address=notify.esc(addr)),
-                         reply_markup=K.admin_back())
+    methods[code]["holder"] = holder
+    await PM.save_methods(methods)
+    await events.log_event("wallet_holder_updated", message.from_user.id, method=code)
+    await message.answer(f"✅ اسم صاحب الحساب: <b>{notify.esc(holder)}</b>")
+    await _after_wallet_save(message, code)
+
+
+# ───────── سعر صرف الليرة ─────────
+
+@router.callback_query(F.data == "adm:rate")
+async def cb_rate(cb: CallbackQuery, state: FSMContext) -> None:
+    rate = await PM.syp_rate()
+    await state.set_state(AdminTopup.syp_rate)
+    await cb.message.answer(
+        T.ADMIN_RATE_EDIT.format(rate=(PM.fmt_rate(rate) + " ل.س") if rate > 0 else "غير مضبوط"),
+        reply_markup=K.cancel_input("adm:wallets"),
+    )
+    await cb.answer()
+
+
+@router.message(AdminTopup.syp_rate, F.text)
+async def msg_rate(message: Message, state: FSMContext) -> None:
+    if message.text.startswith("/") or message.text in T.MAIN_BUTTONS:
+        await state.clear()
+        return
+    rate = PM.parse_rate(message.text)
+    if rate is None:
+        await message.answer(T.ADMIN_RATE_INVALID)
+        return
+    await state.clear()
+    await PM.set_syp_rate(rate)
+    await events.log_event("syp_rate_updated", message.from_user.id, rate=str(rate))
+    await message.answer(T.ADMIN_RATE_SAVED.format(rate=PM.fmt_rate(rate)))
+    text, kb = await _wallets_view()
+    await message.answer(text, reply_markup=kb)
