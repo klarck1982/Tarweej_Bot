@@ -1,0 +1,326 @@
+"""A1 — مراجعة طلبات الشحن + A5 (جزء) — طرق الدفع والعناوين. للأدمن فقط."""
+
+from __future__ import annotations
+
+from decimal import Decimal, InvalidOperation
+
+from aiogram import F, Router
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
+from aiogram.types import CallbackQuery, Message
+
+from app.bot import keyboards as K
+from app.bot import texts as T
+from app.config import settings
+from app.db.repo import events, settings as settings_repo, topups as topups_repo
+from app.services import notify
+from app.services.pricing import fmt, money
+
+router = Router(name="admin_topups")
+router.message.filter(F.from_user.id.in_(set(settings.admin_ids)))
+router.callback_query.filter(F.from_user.id.in_(set(settings.admin_ids)))
+
+
+class AdminTopup(StatesGroup):
+    reject_reason = State()
+    adjust_amount = State()
+    message_user = State()
+    wallet_address = State()
+
+
+# ───────────── القائمة ─────────────
+
+async def _list_view() -> tuple[str, object]:
+    rows = await topups_repo.list_pending()
+    if not rows:
+        return T.ADMIN_TOPUP_LIST_EMPTY, K.admin_back()
+    data = []
+    methods = await settings_repo.get("payment_methods", {}) or {}
+    for r in rows:
+        net = methods.get(r["method"], {}).get("network", r["method"])
+        proof = "📷" if r["proof_file_id"] else ("🔖" if r["proof_text"] else "⏳")
+        data.append((r["id"], f"{proof} #TOP-{r['id']} · {fmt(r['amount_usd'])} {net} · {r['user_name'][:18]}"))
+    return T.ADMIN_TOPUP_LIST.format(n=len(rows)), K.admin_topup_list(data)
+
+
+@router.callback_query(F.data == "adm:topups")
+async def cb_list(cb: CallbackQuery, state: FSMContext) -> None:
+    await state.clear()
+    text, kb = await _list_view()
+    try:
+        await cb.message.edit_text(text, reply_markup=kb)
+    except Exception:  # noqa: BLE001 — رسالة بصورة (بطاقة) لا تُحرَّر كنص
+        await cb.message.answer(text, reply_markup=kb)
+    await cb.answer()
+
+
+@router.callback_query(F.data == "adm:topups:next")
+async def cb_next(cb: CallbackQuery) -> None:
+    rows = await topups_repo.list_pending(limit=1)
+    if not rows:
+        await cb.answer(T.ADMIN_TOPUP_LIST_EMPTY, show_alert=True)
+        return
+    await _send_card(cb, rows[0]["id"])
+    await cb.answer()
+
+
+async def _send_card(cb: CallbackQuery, tid: int) -> None:
+    text, row = await notify.topup_card_text(tid)
+    if not row:
+        await cb.answer("غير موجود", show_alert=True)
+        return
+    kb = None
+    if row["status"] == "pending":
+        remaining = max(0, await topups_repo.count_pending() - 1)
+        kb = K.admin_topup_card(tid, has_proof_image=bool(row.get("proof_file_id")), remaining=remaining)
+    else:
+        kb = K.admin_back()
+    if row.get("proof_file_id"):
+        await cb.message.answer_photo(row["proof_file_id"], caption=text, reply_markup=kb)
+    else:
+        await cb.message.answer(text, reply_markup=kb)
+
+
+@router.callback_query(F.data.regexp(r"^adm:top:(\d+):view$"))
+async def cb_view(cb: CallbackQuery) -> None:
+    tid = int(cb.data.split(":")[2])
+    await _send_card(cb, tid)
+    await cb.answer()
+
+
+@router.callback_query(F.data.regexp(r"^adm:top:(\d+):proof$"))
+async def cb_proof(cb: CallbackQuery) -> None:
+    tid = int(cb.data.split(":")[2])
+    row = await topups_repo.get(tid)
+    if row and row["proof_file_id"]:
+        await cb.message.answer_photo(row["proof_file_id"], caption=f"إثبات #TOP-{tid}")
+    await cb.answer()
+
+
+# ───────────── اعتماد ─────────────
+
+async def _finish(cb_or_msg, bot, tid: int, ok: bool, new_balance, row: dict | None, adjusted: bool = False) -> None:
+    if not ok or not row:
+        return
+    await notify.refresh_admin_cards(bot, tid)
+    await notify.notify_user_topup_result(bot, row, new_balance, adjusted=adjusted)
+    await events.log_event("topup_" + row["status"], row["user_id"], topup_id=tid, amount=str(row["amount_usd"]),
+                           admin_id=row.get("admin_id"))
+
+
+@router.callback_query(F.data.regexp(r"^adm:top:(\d+):ok$"))
+async def cb_approve(cb: CallbackQuery) -> None:
+    tid = int(cb.data.split(":")[2])
+    ok, new_balance, row = await topups_repo.approve(tid, cb.from_user.id)
+    if not ok:
+        await cb.answer(T.ADMIN_ALREADY_DECIDED, show_alert=True)
+        await notify.refresh_admin_cards(cb.bot, tid)
+        return
+    await cb.answer(f"✅ اعتُمد — رصيد العميل {fmt(new_balance)}")
+    await _finish(cb, cb.bot, tid, ok, new_balance, row)
+
+
+@router.callback_query(F.data.regexp(r"^adm:top:(\d+):adj$"))
+async def cb_adjust(cb: CallbackQuery, state: FSMContext) -> None:
+    tid = int(cb.data.split(":")[2])
+    row = await topups_repo.get(tid)
+    if not row or row["status"] != "pending":
+        await cb.answer(T.ADMIN_ALREADY_DECIDED, show_alert=True)
+        return
+    await state.set_state(AdminTopup.adjust_amount)
+    await state.update_data(tid=tid)
+    await cb.message.answer(T.ADMIN_ADJUST_AMOUNT, reply_markup=K.cancel_input(f"adm:top:{tid}:view"))
+    await cb.answer()
+
+
+@router.message(AdminTopup.adjust_amount, F.text)
+async def msg_adjust(message: Message, state: FSMContext) -> None:
+    if message.text.startswith("/") or message.text in T.MAIN_BUTTONS:
+        await state.clear()
+        return
+    raw = message.text.strip().replace("$", "").replace(",", ".").translate(str.maketrans("٠١٢٣٤٥٦٧٨٩", "0123456789"))
+    try:
+        amount = money(Decimal(raw))
+        if amount <= 0:
+            raise InvalidOperation
+    except (InvalidOperation, ValueError):
+        await message.answer("اكتب رقماً صحيحاً مثل <code>9.5</code>")
+        return
+    data = await state.get_data()
+    tid = data["tid"]
+    await state.clear()
+    ok, new_balance, row = await topups_repo.approve(tid, message.from_user.id, amount_override=amount)
+    if not ok:
+        await message.answer(T.ADMIN_ALREADY_DECIDED)
+        return
+    await message.answer(f"✅ اعتُمد #TOP-{tid} بمبلغ {fmt(amount)} — رصيد العميل {fmt(new_balance)}")
+    await _finish(message, message.bot, tid, ok, new_balance, row, adjusted=True)
+
+
+# ───────────── رفض ─────────────
+
+@router.callback_query(F.data.regexp(r"^adm:top:(\d+):no$"))
+async def cb_reject_menu(cb: CallbackQuery) -> None:
+    tid = int(cb.data.split(":")[2])
+    row = await topups_repo.get(tid)
+    if not row or row["status"] != "pending":
+        await cb.answer(T.ADMIN_ALREADY_DECIDED, show_alert=True)
+        return
+    await cb.message.answer(T.ADMIN_REJECT_REASON.format(id=tid), reply_markup=K.admin_reject_reasons(tid))
+    await cb.answer()
+
+
+@router.callback_query(F.data.regexp(r"^adm:top:(\d+):no:(\w+)$"))
+async def cb_reject_reason(cb: CallbackQuery, state: FSMContext) -> None:
+    parts = cb.data.split(":")
+    tid, code = int(parts[2]), parts[4]
+    if code == "custom":
+        await state.set_state(AdminTopup.reject_reason)
+        await state.update_data(tid=tid)
+        await cb.message.edit_text(T.ADMIN_REJECT_CUSTOM, reply_markup=K.cancel_input(f"adm:top:{tid}:view"))
+        await cb.answer()
+        return
+    reason = dict(T.REJECT_REASONS).get(code, code)
+    row = await topups_repo.reject(tid, cb.from_user.id, reason)
+    if not row:
+        await cb.answer(T.ADMIN_ALREADY_DECIDED, show_alert=True)
+        return
+    await cb.message.edit_text(f"❌ رُفض #TOP-{tid}: {reason}", reply_markup=K.admin_back())
+    await cb.answer("تم الرفض")
+    await _finish(cb, cb.bot, tid, True, None, row)
+
+
+@router.message(AdminTopup.reject_reason, F.text)
+async def msg_reject_reason(message: Message, state: FSMContext) -> None:
+    if message.text.startswith("/") or message.text in T.MAIN_BUTTONS:
+        await state.clear()
+        return
+    data = await state.get_data()
+    tid = data["tid"]
+    await state.clear()
+    row = await topups_repo.reject(tid, message.from_user.id, message.text.strip())
+    if not row:
+        await message.answer(T.ADMIN_ALREADY_DECIDED)
+        return
+    await message.answer(f"❌ رُفض #TOP-{tid}: {notify.esc(message.text.strip())}", reply_markup=K.admin_back())
+    await _finish(message, message.bot, tid, True, None, row)
+
+
+# ───────────── مراسلة العميل ─────────────
+
+@router.callback_query(F.data.regexp(r"^adm:msg:(\d+)$"))
+async def cb_message_user(cb: CallbackQuery, state: FSMContext) -> None:
+    tid = int(cb.data.split(":")[2])
+    row = await topups_repo.get(tid)
+    if not row:
+        await cb.answer()
+        return
+    await state.set_state(AdminTopup.message_user)
+    await state.update_data(uid=row["user_id"], tid=tid)
+    await cb.message.answer(f"✍️ اكتب رسالتك للعميل {notify.esc(row['user_name'])} بخصوص #TOP-{tid}:",
+                            reply_markup=K.cancel_input(f"adm:top:{tid}:view"))
+    await cb.answer()
+
+
+@router.message(AdminTopup.message_user, F.text)
+async def msg_message_user(message: Message, state: FSMContext) -> None:
+    if message.text.startswith("/") or message.text in T.MAIN_BUTTONS:
+        await state.clear()
+        return
+    data = await state.get_data()
+    await state.clear()
+    try:
+        await message.bot.send_message(
+            data["uid"], f"💬 <b>رسالة من الدعم بخصوص طلب الشحن #TOP-{data['tid']}:</b>\n{notify.esc(message.text)}",
+            reply_markup=K.support_menu(),
+        )
+        await message.answer("✅ أُرسلت.")
+    except Exception as e:  # noqa: BLE001
+        await message.answer(f"تعذّر الإرسال: {e}")
+
+
+# ───────────── A5: طرق الدفع والعناوين ─────────────
+
+async def _wallets_view() -> tuple[str, object]:
+    methods = await settings_repo.get("payment_methods", {}) or {}
+    rows = []
+    for code, m in methods.items():
+        state = "🟢 فعّالة" if (m.get("enabled") and m.get("address")) else ("🟡 بلا عنوان" if m.get("enabled") else "🔴 متوقفة")
+        addr = f"<code>{notify.esc(m.get('address'))}</code>" if m.get("address") else "<i>لم يُدخل بعد</i>"
+        rows.append(f"• <b>{notify.esc(m['title'])}</b> — {state}\n  {addr}")
+    return T.ADMIN_WALLETS.format(rows="\n".join(rows)), K.admin_wallets(methods)
+
+
+@router.callback_query(F.data == "adm:wallets")
+async def cb_wallets(cb: CallbackQuery, state: FSMContext) -> None:
+    await state.clear()
+    text, kb = await _wallets_view()
+    try:
+        await cb.message.edit_text(text, reply_markup=kb)
+    except Exception:  # noqa: BLE001
+        await cb.message.answer(text, reply_markup=kb)
+    await cb.answer()
+
+
+@router.callback_query(F.data.regexp(r"^adm:wal:(\w+)$"))
+async def cb_wallet(cb: CallbackQuery) -> None:
+    code = cb.data.split(":")[2]
+    methods = await settings_repo.get("payment_methods", {}) or {}
+    m = methods.get(code)
+    if not m:
+        await cb.answer()
+        return
+    addr = f"<code>{notify.esc(m.get('address'))}</code>" if m.get("address") else "<i>لم يُدخل بعد</i>"
+    await cb.message.edit_text(
+        f"🏦 <b>{notify.esc(m['title'])}</b>\nالشبكة: {m['network']}\nالعنوان الحالي: {addr}\nالحالة: {'🟢 مفعّلة' if m.get('enabled') else '🔴 متوقفة'}",
+        reply_markup=K.admin_wallet_edit(code, bool(m.get("enabled"))),
+    )
+    await cb.answer()
+
+
+@router.callback_query(F.data.regexp(r"^adm:wal:(\w+):toggle$"))
+async def cb_wallet_toggle(cb: CallbackQuery) -> None:
+    code = cb.data.split(":")[2]
+    methods = await settings_repo.get("payment_methods", {}) or {}
+    if code in methods:
+        methods[code]["enabled"] = not methods[code].get("enabled", False)
+        await settings_repo.set_("payment_methods", methods)
+        await cb.answer("تم التفعيل 🟢" if methods[code]["enabled"] else "تم الإيقاف 🔴")
+    cb.data = f"adm:wal:{code}"
+    await cb_wallet(cb)
+
+
+@router.callback_query(F.data.regexp(r"^adm:wal:(\w+):edit$"))
+async def cb_wallet_edit(cb: CallbackQuery, state: FSMContext) -> None:
+    code = cb.data.split(":")[2]
+    methods = await settings_repo.get("payment_methods", {}) or {}
+    if code not in methods:
+        await cb.answer()
+        return
+    await state.set_state(AdminTopup.wallet_address)
+    await state.update_data(code=code)
+    await cb.message.answer(T.ADMIN_WALLET_EDIT.format(title=notify.esc(methods[code]["title"])),
+                            reply_markup=K.cancel_input("adm:wallets"))
+    await cb.answer()
+
+
+@router.message(AdminTopup.wallet_address, F.text)
+async def msg_wallet_address(message: Message, state: FSMContext) -> None:
+    if message.text.startswith("/") or message.text in T.MAIN_BUTTONS:
+        await state.clear()
+        return
+    addr = message.text.strip()
+    if not (20 <= len(addr) <= 120) or " " in addr:
+        await message.answer("العنوان مو واضح — انسخه كاملاً من محفظتك بلا مسافات.")
+        return
+    data = await state.get_data()
+    code = data["code"]
+    await state.clear()
+    methods = await settings_repo.get("payment_methods", {}) or {}
+    if code not in methods:
+        return
+    methods[code]["address"] = addr
+    await settings_repo.set_("payment_methods", methods)
+    await events.log_event("wallet_updated", message.from_user.id, method=code)
+    await message.answer(T.ADMIN_WALLET_SAVED.format(title=notify.esc(methods[code]["title"]), address=notify.esc(addr)),
+                         reply_markup=K.admin_back())

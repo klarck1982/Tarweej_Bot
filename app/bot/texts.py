@@ -19,8 +19,10 @@ BTN_BALANCE = "💰 رصيدي"
 BTN_SUPPORT = "🆘 الدعم"
 BTN_INFO = "ℹ️ الأسعار وكيف يعمل"
 BTN_ADMIN = "🛠️ لوحة الإدارة"
+BTN_HOME = "🏠 القائمة"          # الزر الوحيد في الشريط السفلي
+BTN_TOPUP = "➕ شحن رصيد"
 
-MAIN_BUTTONS = {BTN_META, BTN_TG, BTN_DESIGN, BTN_ORDERS, BTN_BALANCE, BTN_SUPPORT, BTN_INFO, BTN_ADMIN}
+MAIN_BUTTONS = {BTN_META, BTN_TG, BTN_DESIGN, BTN_ORDERS, BTN_BALANCE, BTN_SUPPORT, BTN_INFO, BTN_ADMIN, BTN_HOME}
 
 # ───────────── H0 الترحيب ─────────────
 WELCOME_NEW = (
@@ -41,8 +43,9 @@ TERMS_SHORT = (
     "بالضغط على «موافق» تؤكد قبولك لهذه الشروط."
 )
 
-WELCOME_BACK = "أهلاً بعودتك {name} 👋\nشو بدك تعمل اليوم؟ 👇"
-MAIN_MENU = "شو بدك تعمل اليوم؟ 👇\n💰 رصيدك: <b>{balance}</b>"
+WELCOME_BACK = "أهلاً بعودتك {name} 👋"
+WELCOME_FIRST = "هلا {name} 🌟 صار كل شي جاهز."
+MAIN_MENU = f"🏠 <b>{BOT}</b> — القائمة الرئيسية\nاختر الخدمة اللي بدك ياها 👇"
 UNKNOWN_TEXT = "ما فهمت الرسالة 🙂 — اختر من القائمة 👇"
 CANCELLED = "تم الإلغاء ✅ رجعناك للقائمة الرئيسية."
 NOTHING_TO_CANCEL = "ما في عملية جارية لإلغائها 👍"
@@ -96,10 +99,91 @@ def design_intro() -> str:
 
 AI_REEL_SOON = "🤖 <b>الريل السينمائي بالذكاء الاصطناعي</b> قيد التجهيز.\nسجّلنا اهتمامك ✅ — بنبلّغك أول ما يتوفر، ولك خصم أول طلب."
 
-# ───────────── B الرصيد ─────────────
+# ───────────── B الرصيد والشحن ─────────────
 BALANCE = "💰 <b>رصيدك الحالي: {balance}</b>\n{last}"
 BALANCE_NO_TX = "<i>ما في عمليات بعد — اشحن رصيدك لتبدأ.</i>"
-TOPUP_SOON = "➕ <b>شحن الرصيد</b>\nطرق الدفع تُفعَّل في الخطوة <b>2</b> من 6 (USDT + الطرق المحلية).\nلو استعجلت، تواصل مع الدعم وبنشحن لك يدوياً."
+BALANCE_PENDING = "\n\n🟡 عندك طلب شحن معلّق <b>#TOP-{id}</b> بقيمة {amount} — بانتظار التأكيد."
+
+TOPUP_METHOD = (
+    "➕ <b>شحن الرصيد</b>\n\n"
+    "الدفع بعملة <b>USDT</b> فقط حالياً. اختر الشبكة اللي بتحوّل منها:\n"
+    "<i>💡 الشبكة لازم تكون نفسها في محفظتك وعندنا — وإلا يضيع المبلغ.</i>"
+)
+TOPUP_NO_METHODS = "⚠️ طرق الدفع قيد التجهيز — جرّب بعد قليل أو تواصل مع الدعم."
+TOPUP_AMOUNT = (
+    "💵 <b>كم بدك تشحن؟</b>\n"
+    "الطريقة: {method}\n"
+    "الحد الأدنى <b>{min}</b> — اختر مبلغاً أو اكتبه رقماً (مثال: <code>15</code>)"
+)
+TOPUP_AMOUNT_SUGGEST = "\n\n💡 لإكمال طلبك المعلّق ينقصك <b>{gap}</b> — اقترحنا لك المبلغ المناسب."
+TOPUP_AMOUNT_INVALID = "المبلغ مو واضح — اكتب رقماً فقط، مثل <code>10</code> أو <code>25.5</code>"
+TOPUP_AMOUNT_TOO_LOW = "الحد الأدنى للشحن <b>{min}</b> 🙂"
+TOPUP_AMOUNT_TOO_HIGH = "للمبالغ فوق <b>{max}</b> تواصل مع الدعم لترتيب التحويل."
+
+TOPUP_INSTRUCTIONS = (
+    "📤 <b>حوّل الآن — طلب الشحن #TOP-{id}</b>\n\n"
+    "المبلغ: <b>{amount} USDT</b>\n"
+    "الشبكة: <b>{network}</b>\n"
+    "العنوان (اضغط للنسخ):\n<code>{address}</code>\n\n"
+    "⚠️ <b>3 قواعد مهمة:</b>\n"
+    "1️⃣ الشبكة <b>{network}</b> فقط — شبكة مختلفة = ضياع المبلغ.\n"
+    "2️⃣ حوّل <b>{amount}</b> بالضبط (رسوم الشبكة على المُرسِل).\n"
+    "3️⃣ بعد التحويل اضغط «حوّلت» وأرسل لقطة الشاشة أو رقم العملية (TxID).\n\n"
+    "{sla}"
+)
+TOPUP_PROOF = (
+    "📷 <b>أرسل إثبات التحويل</b> — طلب #TOP-{id}\n\n"
+    "• لقطة شاشة من المحفظة تظهر المبلغ والعنوان، <b>أو</b>\n"
+    "• رقم العملية (TxID / Hash) كنص.\n\n"
+    "<i>الصورة لا تُحفظ عندنا — تُعرض للمراجعة فقط.</i>"
+)
+TOPUP_PROOF_INVALID = "أرسل صورة أو رقم العملية (نص طويل من أحرف وأرقام) 🙂"
+TOPUP_WAITING = (
+    "🟡 <b>استلمنا طلب الشحن #TOP-{id}</b>\n"
+    "المبلغ: {amount} — {method}\n\n"
+    "{sla}\n"
+    "بنبلّغك هنا فور الاعتماد ✅"
+)
+TOPUP_CANCELLED = "تم إلغاء طلب الشحن #TOP-{id}."
+TOPUP_APPROVED = "✅ <b>تم شحن {amount} بنجاح!</b>\n💰 رصيدك الآن: <b>{balance}</b>"
+TOPUP_APPROVED_ADJUSTED = "✅ <b>تم اعتماد الشحن بقيمة {amount}</b> (حسب المبلغ الواصل فعلياً)\n💰 رصيدك الآن: <b>{balance}</b>"
+TOPUP_REJECTED = (
+    "❌ <b>ما قدرنا نؤكد طلب الشحن #TOP-{id}</b>\n"
+    "السبب: {reason}\n\n"
+    "إذا حوّلت فعلاً، أرسل لنا رقم العملية عبر تذكرة وبنراجعها فوراً."
+)
+HISTORY_TITLE = "📜 <b>سجل العمليات</b> — صفحة {page}/{pages}"
+HISTORY_EMPTY = "ما في عمليات بعد."
+
+# إشعار الأدمن ببطاقة الشحن
+ADMIN_TOPUP_CARD = (
+    "📥 <b>طلب شحن #TOP-{id}</b>\n"
+    "👤 {name} {username} — <code>{uid}</code>\n"
+    "💵 <b>{amount} USDT</b> — {method}\n"
+    "🔖 TxID: <code>{tx}</code>\n"
+    "💰 رصيده الحالي: {balance} · طلبات سابقة معتمدة: {approved_count}\n"
+    "🕒 {when}"
+)
+ADMIN_TOPUP_DONE = "\n\n{mark} <b>{verdict}</b> بواسطة {admin} — {when}"
+ADMIN_TOPUP_LIST_EMPTY = "📥 لا يوجد طلبات شحن معلّقة ✅"
+ADMIN_TOPUP_LIST = "📥 <b>طلبات الشحن المعلّقة ({n})</b> — اضغط لفتح البطاقة:"
+ADMIN_REJECT_REASON = "اختر سبب الرفض لطلب #TOP-{id}:"
+ADMIN_REJECT_CUSTOM = "اكتب سبب الرفض بسطر واحد (سيصل للعميل):"
+ADMIN_ADJUST_AMOUNT = "اكتب المبلغ الواصل فعلياً بالدولار (مثال: <code>9.5</code>) — سيُعتمد الطلب بهذا المبلغ:"
+ADMIN_ALREADY_DECIDED = "هذا الطلب حُسم مسبقاً."
+ADMIN_WALLETS = (
+    "🏦 <b>طرق الدفع والعناوين</b>\n\n"
+    "{rows}\n"
+    "<i>اضغط على طريقة لتعديل عنوانها أو تشغيلها/إيقافها. العنوان الفارغ = الطريقة مخفية عن العملاء.</i>"
+)
+ADMIN_WALLET_EDIT = "أرسل عنوان محفظة <b>{title}</b> الجديد (انسخه من محفظتك — سنعرضه للعملاء كما هو):"
+ADMIN_WALLET_SAVED = "✅ تم حفظ عنوان {title}:\n<code>{address}</code>"
+REJECT_REASONS = [
+    ("no_funds", "لم يصل أي مبلغ للعنوان"),
+    ("wrong_network", "التحويل على شبكة مختلفة"),
+    ("unreadable", "الإثبات غير واضح — أعد الإرسال"),
+    ("duplicate", "إثبات مستخدم سابقاً"),
+]
 
 # ───────────── O الطلبات ─────────────
 ORDERS_EMPTY = "📦 <b>طلباتك</b>\n\nما عندك طلبات بعد.\nابدأ بإعلان تجربة بـ 14$ — أو صمّم منشورك أولاً 🎨"

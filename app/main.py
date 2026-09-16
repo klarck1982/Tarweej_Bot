@@ -23,8 +23,9 @@ from aiohttp import web
 from app import STEP, VERSION
 from app.bot import texts as T
 from app.bot.fsm_storage import PostgresStorage
-from app.bot.handlers import fallback, menu, start
+from app.bot.handlers import fallback, menu, start, topup
 from app.bot.handlers.admin import panel as admin_panel
+from app.bot.handlers.admin import topups as admin_topups
 from app.bot.middlewares import ErrorsMiddleware, UserMiddleware
 from app.config import settings
 from app.db import pool as db
@@ -45,9 +46,11 @@ def build_dispatcher() -> Dispatcher:
     dp.message.outer_middleware(UserMiddleware())
     dp.callback_query.outer_middleware(UserMiddleware())
     # الترتيب مهم: الأدمن أولاً، ثم start، ثم القوائم، وأخيراً fallback يلتقط كل ما تبقّى
+    dp.include_router(admin_topups.router)
     dp.include_router(admin_panel.router)
     dp.include_router(start.router)
     dp.include_router(menu.router)
+    dp.include_router(topup.router)
     dp.include_router(fallback.router)
     return dp
 
@@ -83,11 +86,12 @@ async def on_startup(bot: Bot, migrations: list[str]) -> None:
     await set_commands(bot)
     me = await bot.get_me()
     users_count = await users_repo.count_users()
-    log.info("bot @%s started — v%s step %s mode=%s users=%s", me.username, VERSION, STEP, settings.mode, users_count)
+    log.info("bot @%s started — v%s step %s mode=%s users=%s admins=%s",
+             me.username, VERSION, STEP, settings.mode, users_count, list(settings.admin_ids))
     await notify_admins(bot, T.STARTUP_NOTICE.format(
         bot=settings.bot_name, version=VERSION, step=STEP, mode=settings.mode,
         migrations=", ".join(migrations) if migrations else "لا شيء", users=users_count,
-    ))
+    ) + f"\nالأدمن المحمّلون: {len(settings.admin_ids)}")
 
 
 async def run() -> None:

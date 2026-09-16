@@ -27,6 +27,15 @@ async def _guard_wizard(message: Message, state: FSMContext) -> None:
         await state.clear()
 
 
+async def _show(cb: CallbackQuery, text: str, kb) -> None:
+    """من القائمة الملوّنة: نحرّر الرسالة نفسها بدل إرسال رسالة جديدة (شاشة واحدة تتبدّل)."""
+    try:
+        await cb.message.edit_text(text, reply_markup=kb)
+    except Exception:  # noqa: BLE001 — رسالة بصورة أو قديمة
+        await cb.message.answer(text, reply_markup=kb)
+    await cb.answer()
+
+
 # ───────────── 📢 Meta ─────────────
 
 @router.message(F.text == T.BTN_META)
@@ -34,6 +43,13 @@ async def m_meta(message: Message, state: FSMContext) -> None:
     await _guard_wizard(message, state)
     svc = await settings_repo.services()
     await message.answer(T.meta_intro(), reply_markup=K.meta_packages(enabled=svc["meta"]))
+
+
+@router.callback_query(F.data == "nav:meta")
+async def cb_nav_meta(cb: CallbackQuery, state: FSMContext) -> None:
+    await state.clear()
+    svc = await settings_repo.services()
+    await _show(cb, T.meta_intro(), K.meta_packages(enabled=svc["meta"]))
 
 
 @router.callback_query(F.data == "meta:pkgs")
@@ -68,6 +84,13 @@ async def m_tg(message: Message, state: FSMContext) -> None:
     await message.answer(T.TG_INTRO, reply_markup=K.tg_tracks(svc["tg_ads"], svc["tg_post"]))
 
 
+@router.callback_query(F.data == "nav:tg")
+async def cb_nav_tg(cb: CallbackQuery, state: FSMContext) -> None:
+    await state.clear()
+    svc = await settings_repo.services()
+    await _show(cb, T.TG_INTRO, K.tg_tracks(svc["tg_ads"], svc["tg_post"]))
+
+
 @router.callback_query(F.data.in_({"tga:start", "tgp:start"}))
 async def cb_tg_start(cb: CallbackQuery) -> None:
     svc = await settings_repo.services()
@@ -86,6 +109,13 @@ async def m_design(message: Message, state: FSMContext) -> None:
     await _guard_wizard(message, state)
     svc = await settings_repo.services()
     await message.answer(T.design_intro(), reply_markup=K.design_services(svc["addons"], svc["ai_reel"]))
+
+
+@router.callback_query(F.data == "nav:design")
+async def cb_nav_design(cb: CallbackQuery, state: FSMContext) -> None:
+    await state.clear()
+    svc = await settings_repo.services()
+    await _show(cb, T.design_intro(), K.design_services(svc["addons"], svc["ai_reel"]))
 
 
 @router.callback_query(F.data == "add:svc:ai_reel")
@@ -109,71 +139,28 @@ async def cb_addon(cb: CallbackQuery) -> None:
     await cb.answer(T.COMING_STEP.format(step=6).replace("<b>", "").replace("</b>", ""), show_alert=True)
 
 
-# ───────────── 💰 الرصيد ─────────────
-
-async def _balance_text(uid: int) -> str:
-    balance = await users_repo.get_balance(uid)
-    last = await db.fetchrow(
-        "SELECT type, amount_usd, created_at FROM ledger WHERE user_id = $1 ORDER BY id DESC LIMIT 1", uid
-    )
-    if last:
-        sign = "+" if last["amount_usd"] > 0 else "−"
-        kinds = {"topup": "شحن", "order_charge": "طلب", "refund": "استرداد", "referral": "إحالة", "adjustment": "تعديل"}
-        when = last["created_at"].strftime("%d/%m %H:%M")
-        last_txt = f"آخر عملية: {kinds.get(last['type'], last['type'])} {sign}{fmt(abs(last['amount_usd']))} — {when}"
-    else:
-        last_txt = T.BALANCE_NO_TX
-    return T.BALANCE.format(balance=fmt(balance), last=last_txt)
-
-
-@router.message(Command("balance"))
-@router.message(F.text == T.BTN_BALANCE)
-async def m_balance(message: Message, state: FSMContext) -> None:
-    await _guard_wizard(message, state)
-    await message.answer(await _balance_text(message.from_user.id), reply_markup=K.balance_menu())
-
-
-@router.callback_query(F.data == "bal:menu")
-async def cb_balance(cb: CallbackQuery) -> None:
-    await cb.message.edit_text(await _balance_text(cb.from_user.id), reply_markup=K.balance_menu())
-    await cb.answer()
-
-
-@router.callback_query(F.data == "bal:topup")
-async def cb_topup(cb: CallbackQuery) -> None:
-    await events.log_event("topup_click", cb.from_user.id)
-    await cb.message.answer(T.TOPUP_SOON, reply_markup=K.home_only())
-    await cb.answer()
-
-
-@router.callback_query(F.data.startswith("bal:hist:"))
-async def cb_history(cb: CallbackQuery) -> None:
-    rows = await db.fetch(
-        "SELECT type, amount_usd, created_at FROM ledger WHERE user_id = $1 ORDER BY id DESC LIMIT 10", cb.from_user.id
-    )
-    if not rows:
-        await cb.answer("ما في عمليات بعد", show_alert=True)
-        return
-    kinds = {"topup": "شحن", "order_charge": "طلب", "refund": "استرداد", "referral": "إحالة", "adjustment": "تعديل"}
-    lines = ["📜 <b>آخر العمليات:</b>"]
-    for r in rows:
-        sign = "+" if r["amount_usd"] > 0 else "−"
-        lines.append(f"{sign}{fmt(abs(r['amount_usd']))}  {kinds.get(r['type'], r['type'])} — {r['created_at']:%d/%m}")
-    await cb.message.edit_text("\n".join(lines), reply_markup=K.back("bal:menu"))
-    await cb.answer()
-
-
 # ───────────── 📦 الطلبات ─────────────
+
+async def _orders_view(uid: int) -> tuple[str, object]:
+    n = await db.fetchval("SELECT count(*) FROM orders WHERE user_id = $1 AND status <> 'draft'", uid)
+    if not n:
+        return T.ORDERS_EMPTY, K.orders_empty()
+    return T.COMING_STEP.format(step=4), K.home_only()
+
 
 @router.message(Command("orders"))
 @router.message(F.text == T.BTN_ORDERS)
 async def m_orders(message: Message, state: FSMContext) -> None:
     await _guard_wizard(message, state)
-    n = await db.fetchval("SELECT count(*) FROM orders WHERE user_id = $1 AND status <> 'draft'", message.from_user.id)
-    if not n:
-        await message.answer(T.ORDERS_EMPTY, reply_markup=K.home_only())
-        return
-    await message.answer(T.COMING_STEP.format(step=4), reply_markup=K.home_only())
+    text, kb = await _orders_view(message.from_user.id)
+    await message.answer(text, reply_markup=kb)
+
+
+@router.callback_query(F.data == "nav:orders")
+async def cb_nav_orders(cb: CallbackQuery, state: FSMContext) -> None:
+    await state.clear()
+    text, kb = await _orders_view(cb.from_user.id)
+    await _show(cb, text, kb)
 
 
 # ───────────── 🆘 الدعم ─────────────
@@ -185,8 +172,10 @@ async def m_support(message: Message, state: FSMContext) -> None:
 
 
 @router.callback_query(F.data == "sup:menu")
-async def cb_support(cb: CallbackQuery) -> None:
-    await cb.message.edit_text(T.SUPPORT_MENU, reply_markup=K.support_menu())
+async def cb_support(cb: CallbackQuery, state: FSMContext) -> None:
+    await state.clear()
+    await _show(cb, T.SUPPORT_MENU, K.support_menu())
+    return
     await cb.answer()
 
 
@@ -224,8 +213,10 @@ async def m_info(message: Message, state: FSMContext) -> None:
 
 
 @router.callback_query(F.data == "info:menu")
-async def cb_info(cb: CallbackQuery) -> None:
-    await cb.message.edit_text(T.INFO_MENU, reply_markup=K.info_menu())
+async def cb_info(cb: CallbackQuery, state: FSMContext) -> None:
+    await state.clear()
+    await _show(cb, T.INFO_MENU, K.info_menu())
+    return
     await cb.answer()
 
 

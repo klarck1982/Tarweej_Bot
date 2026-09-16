@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 from aiogram.types import (
+    CopyTextButton,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
     KeyboardButton,
@@ -19,27 +20,39 @@ from app.bot import texts as T
 from app.config import settings
 
 
-def ib(text: str, data: str) -> InlineKeyboardButton:
-    return InlineKeyboardButton(text=text, callback_data=data)
+# ألوان الأزرار (Bot API 9.4): success أخضر · danger أحمر · primary أزرق · None رمادي
+# لغة الألوان في البوت: أخضر = تأكيد/مال داخل · أحمر = إلغاء/رفض/إيقاف/إدارة · أزرق = الإجراء الرئيسي · رمادي = تنقّل
+def ib(text: str, data: str, style: str | None = None) -> InlineKeyboardButton:
+    return InlineKeyboardButton(text=text, callback_data=data, style=style)
 
 
 def url_btn(text: str, url: str) -> InlineKeyboardButton:
     return InlineKeyboardButton(text=text, url=url)
 
 
-# ───────────── H1 اللوحة الرئيسية ─────────────
+# ───────────── H1 القائمة الرئيسية ─────────────
 
-def main_menu(is_admin: bool = False) -> ReplyKeyboardMarkup:
+def home_bar() -> ReplyKeyboardMarkup:
+    """الشريط السفلي: زر واحد فقط 🏠 — القائمة نفسها ملوّنة داخل الرسالة."""
+    return ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text=T.BTN_HOME)]],
+        resize_keyboard=True, is_persistent=True,
+        input_field_placeholder="اضغط 🏠 للقائمة الرئيسية",
+    )
+
+
+def main_menu(is_admin: bool = False, balance: str = "0$") -> InlineKeyboardMarkup:
+    """القائمة الرئيسية داخل الرسالة (تصميم Ichancy): أزرق للخدمة الرئيسية، أخضر للشحن، أحمر للإدارة."""
     rows = [
-        [KeyboardButton(text=T.BTN_META), KeyboardButton(text=T.BTN_TG)],
-        [KeyboardButton(text=T.BTN_DESIGN), KeyboardButton(text=T.BTN_ORDERS)],
-        [KeyboardButton(text=T.BTN_BALANCE), KeyboardButton(text=T.BTN_SUPPORT)],
-        [KeyboardButton(text=T.BTN_INFO)],
+        [ib(T.BTN_META, "nav:meta", "primary")],
+        [ib(T.BTN_TG, "nav:tg"), ib(T.BTN_DESIGN, "nav:design")],
+        [ib(f"{T.BTN_BALANCE} · {balance}", "bal:menu"), ib(T.BTN_TOPUP, "bal:topup", "success")],
+        [ib(T.BTN_ORDERS, "nav:orders"), ib(T.BTN_SUPPORT, "sup:menu")],
+        [ib(T.BTN_INFO, "info:menu")],
     ]
     if is_admin:
-        rows.append([KeyboardButton(text=T.BTN_ADMIN)])
-    return ReplyKeyboardMarkup(keyboard=rows, resize_keyboard=True, is_persistent=True,
-                               input_field_placeholder="اختر من القائمة 👇")
+        rows.append([ib(T.BTN_ADMIN, "adm:panel", "danger")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 # ───────────── H0 الترحيب ─────────────
@@ -47,12 +60,12 @@ def main_menu(is_admin: bool = False) -> ReplyKeyboardMarkup:
 def welcome() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [ib("📜 الشروط باختصار", "nav:terms")],
-        [ib("✅ موافق، لنبدأ", "nav:accept")],
+        [ib("✅ موافق، لنبدأ", "nav:accept", "success")],
     ])
 
 
 def terms_back() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[[ib("✅ موافق، لنبدأ", "nav:accept")]])
+    return InlineKeyboardMarkup(inline_keyboard=[[ib("✅ موافق، لنبدأ", "nav:accept", "success")]])
 
 
 def home_only() -> InlineKeyboardMarkup:
@@ -61,6 +74,13 @@ def home_only() -> InlineKeyboardMarkup:
 
 def back(to: str, label: str = "◀️ رجوع") -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[[ib(label, to)]])
+
+
+def orders_empty() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [ib("🚀 ابدأ بإعلان تجربة — 14$", "nav:meta", "primary")],
+        [ib("🏠 القائمة", "nav:home")],
+    ])
 
 
 # ───────────── M0 باقات Meta (معاينة) ─────────────
@@ -104,13 +124,85 @@ def design_services(enabled: bool = True, ai_on: bool = False) -> InlineKeyboard
     ])
 
 
-# ───────────── B الرصيد ─────────────
+# ───────────── B الرصيد والشحن ─────────────
 
-def balance_menu() -> InlineKeyboardMarkup:
+def balance_menu(pending_id: int | None = None) -> InlineKeyboardMarkup:
+    rows = [[ib(T.BTN_TOPUP, "bal:topup", "success"), ib("📜 سجل العمليات", "bal:hist:1")]]
+    if pending_id:
+        rows.insert(0, [ib(f"🟡 متابعة الشحن المعلّق #TOP-{pending_id}", f"bal:view:{pending_id}")])
+    rows.append([ib("🏠 القائمة", "nav:home")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def topup_methods(methods: dict[str, dict]) -> InlineKeyboardMarkup:
+    rows = []
+    for code, m in methods.items():
+        if m.get("enabled") and m.get("address"):
+            rows.append([ib(f"💵 {m['title']}", f"bal:m:{code}")])
+    rows.append([ib("◀️ رجوع", "bal:menu")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def topup_amounts(presets: list, suggested: float | None = None) -> InlineKeyboardMarkup:
+    b = InlineKeyboardBuilder()
+    if suggested:
+        b.row(ib(f"✨ {suggested:g}$ — لإكمال طلبك", f"bal:amt:{suggested:g}"))
+    btns = [ib(f"{p:g}$", f"bal:amt:{p:g}") for p in presets]
+    for i in range(0, len(btns), 3):
+        b.row(*btns[i:i + 3])
+    b.row(ib("◀️ رجوع", "bal:topup"), ib("❌ إلغاء", "bal:cancel", "danger"))
+    return b.as_markup()
+
+
+def topup_instructions(topup_id: int, address: str) -> InlineKeyboardMarkup:
+    rows = [
+        [ib("✅ حوّلت — أرسل الإثبات", f"bal:paid:{topup_id}", "success")],
+        [InlineKeyboardButton(text="📋 نسخ العنوان", copy_text=CopyTextButton(text=address), style="primary")],
+        [ib("❌ إلغاء الطلب", f"bal:cancel:{topup_id}", "danger")],
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def topup_proof(topup_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
-        [ib("➕ شحن رصيد", "bal:topup"), ib("📜 سجل العمليات", "bal:hist:1")],
-        [ib("🏠 القائمة", "nav:home")],
+        [ib("◀️ رجوع للتعليمات", f"bal:view:{topup_id}")],
+        [ib("❌ إلغاء الطلب", f"bal:cancel:{topup_id}", "danger")],
     ])
+
+
+def topup_waiting(topup_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [ib("📎 إرسال إثبات إضافي", f"bal:paid:{topup_id}")],
+        [ib("❌ إلغاء الطلب", f"bal:cancel:{topup_id}", "danger"), ib("🏠 القائمة", "nav:home")],
+    ])
+
+
+def topup_approved(has_draft: bool = False) -> InlineKeyboardMarkup:
+    rows = []
+    if has_draft:
+        rows.append([ib("📦 أكمل طلبي المعلّق", "ord:resume", "success")])
+    rows.append([ib("🚀 ابدأ طلباً جديداً", "nav:home", "primary")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def topup_rejected() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [ib("🔁 إعادة المحاولة", "bal:topup", "primary"), ib("🎫 فتح تذكرة", "sup:new")],
+    ])
+
+
+def history_nav(page: int, pages: int) -> InlineKeyboardMarkup:
+    rows = []
+    if pages > 1:
+        nav = []
+        if page > 1:
+            nav.append(ib("◀️", f"bal:hist:{page - 1}"))
+        nav.append(ib(f"{page} / {pages}", "nav:noop"))
+        if page < pages:
+            nav.append(ib("▶️", f"bal:hist:{page + 1}"))
+        rows.append(nav)
+    rows.append([ib("◀️ رجوع", "bal:menu")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 # ───────────── S الدعم ─────────────
@@ -157,7 +249,7 @@ def info_menu() -> InlineKeyboardMarkup:
 def info_back(start_cta: bool = False) -> InlineKeyboardMarkup:
     rows = []
     if start_cta:
-        rows.append([ib("🚀 ابدأ الآن — اشحن رصيد", "bal:topup")])
+        rows.append([ib("🚀 ابدأ الآن — اشحن رصيد", "bal:topup", "success")])
     rows.append([ib("◀️ رجوع", "info:menu"), ib("🏠 القائمة", "nav:home")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -168,12 +260,76 @@ def admin_panel(topups: int = 0, tasks: int = 0, tickets: int = 0) -> InlineKeyb
     def n(x: int) -> str:
         return f" ({x})" if x else ""
     return InlineKeyboardMarkup(inline_keyboard=[
-        [ib(f"📥 شحن معلّق{n(topups)}", "adm:topups"), ib(f"🛠️ مهام يدوية{n(tasks)}", "adm:tasks")],
-        [ib(f"🎫 تذاكر{n(tickets)}", "adm:tickets"), ib("📊 إحصائيات", "adm:stats")],
+        [ib(f"📥 شحن معلّق{n(topups)}", "adm:topups", "primary" if topups else None),
+         ib(f"🛠️ مهام يدوية{n(tasks)}", "adm:tasks", "primary" if tasks else None)],
+        [ib(f"🎫 تذاكر{n(tickets)}", "adm:tickets", "primary" if tickets else None), ib("📊 إحصائيات", "adm:stats")],
         [ib("📣 بث رسالة", "adm:bc"), ib("⚙️ إعدادات", "adm:settings")],
         [ib("👤 بحث عن مستخدم", "adm:find"), ib("🔄 تحديث", "adm:panel")],
+        [ib("🏠 القائمة", "nav:home")],
     ])
 
 
 def admin_back() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[[ib("◀️ رجوع للوحة", "adm:panel")]])
+
+
+def admin_settings_menu() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [ib("🔛 تشغيل / إيقاف الخدمات", "adm:svcs")],
+        [ib("🏦 طرق الدفع والعناوين", "adm:wallets")],
+        [ib("◀️ رجوع للوحة", "adm:panel")],
+    ])
+
+
+def admin_topup_card(topup_id: int, has_proof_image: bool, remaining: int = 0) -> InlineKeyboardMarkup:
+    rows = [[ib("✅ اعتماد", f"adm:top:{topup_id}:ok", "success"), ib("❌ رفض", f"adm:top:{topup_id}:no", "danger")],
+            [ib("✏️ اعتماد بمبلغ مختلف", f"adm:top:{topup_id}:adj")]]
+    third = []
+    if has_proof_image:
+        third.append(ib("👁️ فتح الإثبات", f"adm:top:{topup_id}:proof"))
+    third.append(ib("💬 مراسلة", f"adm:msg:{topup_id}"))
+    rows.append(third)
+    last = [ib("◀️ القائمة", "adm:topups")]
+    if remaining:
+        last.insert(0, ib(f"⏭️ التالي ({remaining})", "adm:topups:next", "primary"))
+    rows.append(last)
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def admin_topup_list(rows_data: list[tuple[int, str]]) -> InlineKeyboardMarkup:
+    b = InlineKeyboardBuilder()
+    for tid, label in rows_data:
+        b.row(ib(label, f"adm:top:{tid}:view"))
+    b.row(ib("🔄 تحديث", "adm:topups"), ib("◀️ رجوع للوحة", "adm:panel"))
+    return b.as_markup()
+
+
+def admin_reject_reasons(topup_id: int) -> InlineKeyboardMarkup:
+    b = InlineKeyboardBuilder()
+    for code, label in T.REJECT_REASONS:
+        b.row(ib(label, f"adm:top:{topup_id}:no:{code}"))
+    b.row(ib("✍️ سبب آخر", f"adm:top:{topup_id}:no:custom"))
+    b.row(ib("◀️ رجوع للبطاقة", f"adm:top:{topup_id}:view"))
+    return b.as_markup()
+
+
+def admin_wallets(methods: dict[str, dict]) -> InlineKeyboardMarkup:
+    b = InlineKeyboardBuilder()
+    for code, m in methods.items():
+        state = "🟢" if (m.get("enabled") and m.get("address")) else ("🟡" if m.get("enabled") else "🔴")
+        style = {"🟢": "success", "🔴": "danger"}.get(state)
+        b.row(ib(f"{state} {m['title']}", f"adm:wal:{code}", style))
+    b.row(ib("◀️ رجوع", "adm:settings"))
+    return b.as_markup()
+
+
+def admin_wallet_edit(code: str, enabled: bool) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [ib("✏️ تعديل العنوان", f"adm:wal:{code}:edit")],
+        [ib("🔴 إيقاف الطريقة", f"adm:wal:{code}:toggle", "danger") if enabled else ib("🟢 تفعيل الطريقة", f"adm:wal:{code}:toggle", "success")],
+        [ib("◀️ رجوع", "adm:wallets")],
+    ])
+
+
+def cancel_input(back_to: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[[ib("❌ إلغاء", back_to, "danger")]])
