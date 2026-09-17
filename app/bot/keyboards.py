@@ -308,16 +308,55 @@ def admin_settings_menu() -> InlineKeyboardMarkup:
         [ib("🏦 طرق الدفع والحسابات", "adm:wallets")],
         [ib("💱 سعر صرف الليرة", "adm:rate")],
         [ib("👤 المعرّف الاحتياطي (نور)", "adm:fallback")],
+        [ib("📡 قنوات الإدارة", "adm:ch:menu")],
         [ib("◀️ رجوع للوحة", "adm:panel")],
     ])
 
 
-def admin_topup_card(topup_id: int, has_proof_image: bool, remaining: int = 0) -> InlineKeyboardMarkup:
+# ═══════════════════════════ قنوات الإدارة ═══════════════════════════
+
+def admin_channels_menu(cfg: dict) -> InlineKeyboardMarkup:
+    from app.services import channels as CH
+    rows = []
+    for kind in CH.KINDS:
+        ch = cfg.get(kind)
+        if ch and ch.get("id"):
+            rows.append([ib(f"{CH.label(kind)} — {ch.get('title', '')[:24]} ✅", f"adm:ch:info:{kind}")])
+        else:
+            rows.append([ib(f"{CH.label(kind)} — غير مربوطة", f"adm:ch:help")])
+    rows.append([ib("❓ كيف أربط قناة؟", "adm:ch:help")])
+    rows.append([ib("◀️ رجوع", "adm:settings")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def admin_channel_info(kind: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [ib("🧪 إرسال رسالة اختبار", f"adm:ch:test:{kind}")],
+        [ib("🔌 فصل القناة", f"adm:ch:unbind:{kind}", "danger")],
+        [ib("◀️ رجوع", "adm:ch:menu")],
+    ])
+
+
+def admin_channel_bind(chat_id: int, taken: dict) -> InlineKeyboardMarkup:
+    """يظهر في خاصّ الأدمن فور إضافة البوت إلى قناة: لأي غرض تُستخدم؟"""
+    from app.services import channels as CH
+    rows = []
+    for kind in CH.KINDS:
+        cur = taken.get(kind)
+        suffix = f" (حالياً: {cur['title'][:16]})" if cur and cur.get("id") else ""
+        rows.append([ib(f"{CH.label(kind)}{suffix}", f"adm:ch:bind:{kind}:{chat_id}", "primary" if not cur else None)])
+    rows.append([ib("🚫 تجاهل هذه القناة", f"adm:ch:ignore:{chat_id}")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def admin_topup_card(topup_id: int, has_proof_image: bool, remaining: int = 0, in_channel: bool = False) -> InlineKeyboardMarkup:
     rows = [[ib("✅ اعتماد", f"adm:top:{topup_id}:ok", "success"), ib("❌ رفض", f"adm:top:{topup_id}:no", "danger")],
             [ib("✏️ اعتماد بمبلغ مختلف", f"adm:top:{topup_id}:adj")]]
-    if has_proof_image:
+    if has_proof_image and not in_channel:   # في القناة الصورة ظاهرة في البطاقة نفسها
         rows.append([ib("👁️ فتح الإثبات", f"adm:top:{topup_id}:proof")])
     rows.append([ib("💬 مراسلة العميل", f"adm:msg:{topup_id}")])
+    if in_channel:
+        return InlineKeyboardMarkup(inline_keyboard=rows)
     if remaining:
         rows.append([ib(f"⏭️ التالي ({remaining})", "adm:topups:next", "primary")])
     rows.append([ib("◀️ القائمة", "adm:topups")])
@@ -338,7 +377,7 @@ def admin_reject_reasons(topup_id: int) -> InlineKeyboardMarkup:
     for code, label in T.REJECT_REASONS:
         b.row(ib(label, f"adm:top:{topup_id}:no:{code}"))
     b.row(ib("✍️ سبب آخر", f"adm:top:{topup_id}:no:custom"))
-    b.row(ib("◀️ رجوع للبطاقة", f"adm:top:{topup_id}:view"))
+    b.row(ib("◀️ رجوع", f"adm:top:{topup_id}:kb"))   # يعيد أزرار البطاقة في مكانها (يعمل في القناة والخاص)
     return b.as_markup()
 
 
@@ -582,7 +621,7 @@ def admin_orders_list(rows_data: list[tuple[int, str]]) -> InlineKeyboardMarkup:
     return b.as_markup()
 
 
-def admin_order_card(order: dict, dry_run: bool, media_count: int = 0) -> InlineKeyboardMarkup:
+def admin_order_card(order: dict, dry_run: bool, media_count: int = 0, in_channel: bool = False) -> InlineKeyboardMarkup:
     oid = order["id"]
     st = order["status"]
     rows = []
@@ -602,5 +641,6 @@ def admin_order_card(order: dict, dry_run: bool, media_count: int = 0) -> Inline
     rows.append([ib("💬 مراسلة العميل", f"adm:ord:{oid}:msg")])
     if st in ("paid", "submitted", "in_progress", "active", "paused"):
         rows.append([ib("↩️ استرداد كامل وإغلاق", f"adm:ord:{oid}:refund", "danger")])
-    rows.append([ib("◀️ الطلبات", "adm:orders")])
+    if not in_channel:
+        rows.append([ib("◀️ الطلبات", "adm:orders")])
     return InlineKeyboardMarkup(inline_keyboard=rows)

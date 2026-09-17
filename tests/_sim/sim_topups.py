@@ -31,7 +31,7 @@ def show(label):
     sent.clear()
 async def main():
     await db.init_pool(os.environ["DATABASE_URL"]); print("migrations:", await db.run_migrations())
-    await db.execute("TRUNCATE fsm_state, events, ledger, topups RESTART IDENTITY CASCADE; DELETE FROM users WHERE tg_id IN (555,999)")
+    await db.execute("TRUNCATE fsm_state, events, ledger, topups, order_media, orders RESTART IDENTITY CASCADE; DELETE FROM users WHERE tg_id IN (555,999)")
     # نبدأ من حالة "المستخدم أدخل عنوان TRC20 سابقاً" (كما في الإنتاج) ثم طُبّق 003
     print("payment_methods keys:", list((await db.fetchval("select value from settings where key='payment_methods'")) and __import__('json').loads(await db.fetchval("select value from settings where key='payment_methods'")) or {}))
     bot=Bot("123456:TESTTOKEN", session=FakeSession(), default=DefaultBotProperties(parse_mode="HTML")); dp=build_dispatcher()

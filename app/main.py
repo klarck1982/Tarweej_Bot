@@ -81,11 +81,9 @@ async def set_commands(bot: Bot) -> None:
 
 
 async def notify_admins(bot: Bot, text: str) -> None:
-    for admin_id in settings.admin_ids:
-        try:
-            await bot.send_message(admin_id, text)
-        except Exception as e:  # noqa: BLE001
-            log.info("cannot notify admin %s: %s", admin_id, e)
+    """إشعار نظام → قناة التنبيهات إن رُبطت، وإلا الأدمن في الخاص."""
+    from app.services import channels
+    await channels.alert(bot, text)
 
 
 async def on_startup(bot: Bot, migrations: list[str]) -> None:

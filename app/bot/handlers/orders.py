@@ -103,11 +103,13 @@ async def cb_media(cb: CallbackQuery) -> None:
     await cb.answer()
 
 
-async def send_media(cb: CallbackQuery, oid: int) -> None:
+async def send_media(cb: CallbackQuery, oid: int, dest: int | None = None) -> None:
+    """يرسل ملفات الطلب إلى dest (افتراضياً نفس المحادثة)."""
     items = await repo.media(oid)
     if not items:
         await cb.answer("لا توجد ملفات", show_alert=True)
         return
+    chat_id = dest or cb.message.chat.id
     group = []
     for it in items:
         if it["kind"] == "photo":
@@ -115,15 +117,15 @@ async def send_media(cb: CallbackQuery, oid: int) -> None:
         elif it["kind"] == "video":
             group.append(InputMediaVideo(media=it["file_id"]))
         else:
-            await cb.message.answer_document(it["file_id"], caption=f"ملف #ORD-{oid}")
+            await cb.bot.send_document(chat_id, it["file_id"], caption=f"ملف #ORD-{oid}")
     if len(group) == 1:
         m = group[0]
         if isinstance(m, InputMediaPhoto):
-            await cb.message.answer_photo(m.media, caption=f"ملفات #ORD-{oid}")
+            await cb.bot.send_photo(chat_id, m.media, caption=f"ملفات #ORD-{oid}")
         else:
-            await cb.message.answer_video(m.media, caption=f"ملفات #ORD-{oid}")
+            await cb.bot.send_video(chat_id, m.media, caption=f"ملفات #ORD-{oid}")
     elif group:
-        await cb.message.answer_media_group(group)
+        await cb.bot.send_media_group(chat_id, group)
 
 
 @router.callback_query(F.data.startswith("ord:help:"))

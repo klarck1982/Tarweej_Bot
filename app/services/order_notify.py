@@ -13,7 +13,7 @@ from app.bot import keyboards as K
 from app.bot import texts as T
 from app.config import settings
 from app.db.repo import orders as repo, users as users_repo
-from app.services import nour, orders as orders_svc, pricing as P, targeting as TG
+from app.services import channels, nour, orders as orders_svc, pricing as P, targeting as TG
 from app.services.pricing import fmt
 
 log = logging.getLogger("order_notify")
@@ -74,14 +74,10 @@ async def notify_admins_new_order(bot: Bot, order_id: int) -> None:
         return
     media_count = len(await repo.media(order_id))
     text = await admin_card_text(order, media_count)
-    kb = K.admin_order_card(order, nour.is_dry_run(), media_count)
-    msg_ids: list[list[int]] = []
-    for admin_id in settings.admin_ids:
-        try:
-            m = await bot.send_message(admin_id, text, reply_markup=kb)
-            msg_ids.append([admin_id, m.message_id])
-        except Exception as e:  # noqa: BLE001
-            log.warning("cannot notify admin %s about order %s: %s", admin_id, order_id, e)
+    targets = await channels.chat_ids_for("orders")
+    to_channel = bool(targets) and channels.is_channel_chat(targets[0])
+    kb = K.admin_order_card(order, nour.is_dry_run(), media_count, in_channel=to_channel)
+    msg_ids = await channels.send(bot, "orders", text, kb)
     if msg_ids:
         await repo.set_messages(order_id, admin_msg_ids=msg_ids)
     if order["status"] == "paid" and order.get("note"):
@@ -97,21 +93,18 @@ async def refresh_admin_cards(bot: Bot, order_id: int) -> None:
         return
     media_count = len(await repo.media(order_id))
     text = await admin_card_text(order, media_count)
-    kb = K.admin_order_card(order, nour.is_dry_run(), media_count)
     for pair in order.get("admin_msg_ids") or []:
         try:
             chat_id, message_id = pair
+            kb = K.admin_order_card(order, nour.is_dry_run(), media_count, in_channel=channels.is_channel_chat(chat_id))
             await bot.edit_message_text(text, chat_id=chat_id, message_id=message_id, reply_markup=kb)
         except Exception as e:  # noqa: BLE001 — لم يتغير / قديمة
             log.debug("refresh order card failed %s: %s", pair, e)
 
 
 async def notify_admins_text(bot: Bot, text: str) -> None:
-    for admin_id in settings.admin_ids:
-        try:
-            await bot.send_message(admin_id, text)
-        except Exception as e:  # noqa: BLE001
-            log.info("cannot notify admin %s: %s", admin_id, e)
+    """تنبيه نظام → قناة التنبيهات إن رُبطت، وإلا الأدمن في الخاص."""
+    await channels.alert(bot, text)
 
 
 async def push_user_status(bot: Bot, order: dict, reason: str | None = None) -> None:

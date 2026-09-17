@@ -14,6 +14,7 @@ from app.bot import texts as T
 from app.config import settings
 from app.db import pool as db
 from app.db.repo import settings as settings_repo, topups as topups_repo
+from app.services import channels
 from app.services.pricing import fmt
 
 log = logging.getLogger("notify")
@@ -56,17 +57,12 @@ async def notify_admins_topup(bot: Bot, tid: int) -> None:
     if not row:
         return
     remaining = max(0, await topups_repo.count_pending() - 1)
-    kb = K.admin_topup_card(tid, has_proof_image=bool(row.get("proof_file_id")), remaining=remaining)
-    msg_ids: list[list[int]] = []
-    for admin_id in settings.admin_ids:
-        try:
-            if row.get("proof_file_id"):
-                m = await bot.send_photo(admin_id, row["proof_file_id"], caption=text, reply_markup=kb)
-            else:
-                m = await bot.send_message(admin_id, text, reply_markup=kb)
-            msg_ids.append([admin_id, m.message_id])
-        except Exception as e:  # noqa: BLE001
-            log.warning("cannot notify admin %s about topup %s: %s", admin_id, tid, e)
+    targets = await channels.chat_ids_for("topups")
+    to_channel = bool(targets) and channels.is_channel_chat(targets[0])
+    # داخل القناة: بلا أزرار تنقّل («التالي»/«القائمة») — البطاقات كلها موجودة هناك أصلاً
+    kb = K.admin_topup_card(tid, has_proof_image=bool(row.get("proof_file_id")),
+                            remaining=0 if to_channel else remaining, in_channel=to_channel)
+    msg_ids = await channels.send(bot, "topups", text, kb, photo=row.get("proof_file_id"))
     if msg_ids:
         await topups_repo.set_messages(tid, admin_msg_ids=msg_ids)
 
@@ -114,8 +110,5 @@ async def notify_user_topup_result(bot: Bot, row: dict, new_balance=None, adjust
 
 
 async def notify_admins_text(bot: Bot, text: str) -> None:
-    for admin_id in settings.admin_ids:
-        try:
-            await bot.send_message(admin_id, text)
-        except Exception as e:  # noqa: BLE001
-            log.info("cannot notify admin %s: %s", admin_id, e)
+    """تنبيه نظام → قناة التنبيهات إن رُبطت، وإلا الأدمن في الخاص."""
+    await channels.alert(bot, text)

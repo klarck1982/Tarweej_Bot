@@ -80,18 +80,18 @@ class ErrorsMiddleware(BaseMiddleware):
             if isinstance(event, Update):
                 if event.message:
                     uid = event.message.chat.id
-                elif event.callback_query and event.callback_query.message:
-                    uid = event.callback_query.message.chat.id
-            if bot and uid:
+                elif event.callback_query:
+                    uid = event.callback_query.from_user.id   # لا نكتب في القناة — نراسل الضاغط في خاصّه
+            if bot and uid and uid > 0:
                 try:
                     await bot.send_message(uid, "حدث خطأ مؤقت 😕 — جرّب مرة ثانية، وإذا تكرر تواصل مع الدعم.")
                 except Exception:  # noqa: BLE001
                     pass
             if bot and settings.admin_ids:
                 try:
-                    await bot.send_message(
-                        settings.admin_ids[0],
-                        f"⚠️ <b>خطأ غير متوقع</b>\n<code>{type(e).__name__}: {str(e)[:300]}</code>\nمستخدم: {uid}",
+                    from app.services import channels
+                    await channels.alert(
+                        bot, f"⚠️ <b>خطأ غير متوقع</b>\n<code>{type(e).__name__}: {str(e)[:300]}</code>\nمستخدم: {uid}",
                     )
                 except Exception:  # noqa: BLE001
                     pass

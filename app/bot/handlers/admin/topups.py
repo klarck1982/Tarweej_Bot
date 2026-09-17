@@ -11,9 +11,10 @@ from aiogram.types import CallbackQuery, Message
 
 from app.bot import keyboards as K
 from app.bot import texts as T
+from app.bot.handlers.admin import _common as C
 from app.config import settings
 from app.db.repo import events, settings as settings_repo, topups as topups_repo
-from app.services import notify
+from app.services import channels, notify
 from app.services import payments as PM
 from app.services.pricing import fmt, money
 
@@ -78,10 +79,32 @@ async def _send_card(cb: CallbackQuery, tid: int) -> None:
         kb = K.admin_topup_card(tid, has_proof_image=bool(row.get("proof_file_id")), remaining=remaining)
     else:
         kb = K.admin_back()
+    dest = cb.from_user.id if C.in_channel(cb) else cb.message.chat.id
     if row.get("proof_file_id"):
-        await cb.message.answer_photo(row["proof_file_id"], caption=text, reply_markup=kb)
+        await cb.bot.send_photo(dest, row["proof_file_id"], caption=text, reply_markup=kb)
     else:
-        await cb.message.answer(text, reply_markup=kb)
+        await cb.bot.send_message(dest, text, reply_markup=kb)
+
+
+@router.callback_query(F.data.regexp(r"^adm:top:(\d+):kb$"))
+async def cb_restore_kb(cb: CallbackQuery) -> None:
+    """«رجوع» من قائمة أسباب الرفض: يعيد أزرار البطاقة في مكانها (يعمل في القناة والخاص)."""
+    tid = int(cb.data.split(":")[2])
+    row = await topups_repo.get(tid)
+    if not row:
+        await cb.answer()
+        return
+    if row["status"] != "pending":
+        await notify.refresh_admin_cards(cb.bot, tid)
+        await cb.answer(T.ADMIN_ALREADY_DECIDED, show_alert=True)
+        return
+    remaining = max(0, await topups_repo.count_pending() - 1)
+    kb = K.admin_topup_card(tid, has_proof_image=bool(row.get("proof_file_id")), remaining=remaining, in_channel=C.in_channel(cb))
+    try:
+        await cb.message.edit_reply_markup(reply_markup=kb)
+    except Exception:  # noqa: BLE001
+        pass
+    await cb.answer()
 
 
 @router.callback_query(F.data.regexp(r"^adm:top:(\d+):view$"))
@@ -96,7 +119,8 @@ async def cb_proof(cb: CallbackQuery) -> None:
     tid = int(cb.data.split(":")[2])
     row = await topups_repo.get(tid)
     if row and row["proof_file_id"]:
-        await cb.message.answer_photo(row["proof_file_id"], caption=f"إثبات #TOP-{tid}")
+        dest = cb.from_user.id if C.in_channel(cb) else cb.message.chat.id
+        await cb.bot.send_photo(dest, row["proof_file_id"], caption=f"إثبات #TOP-{tid}")
     await cb.answer()
 
 
@@ -130,10 +154,8 @@ async def cb_adjust(cb: CallbackQuery, state: FSMContext) -> None:
     if not row or row["status"] != "pending":
         await cb.answer(T.ADMIN_ALREADY_DECIDED, show_alert=True)
         return
-    await state.set_state(AdminTopup.adjust_amount)
-    await state.update_data(tid=tid)
-    await cb.message.answer(T.ADMIN_ADJUST_AMOUNT, reply_markup=K.cancel_input(f"adm:top:{tid}:view"))
-    await cb.answer()
+    await C.ask_input(cb, state, AdminTopup.adjust_amount, {"tid": tid}, T.ADMIN_ADJUST_AMOUNT,
+                      K.cancel_input("adm:cancel_input"))
 
 
 @router.message(AdminTopup.adjust_amount, F.text)
@@ -169,8 +191,12 @@ async def cb_reject_menu(cb: CallbackQuery) -> None:
     if not row or row["status"] != "pending":
         await cb.answer(T.ADMIN_ALREADY_DECIDED, show_alert=True)
         return
-    await cb.message.answer(T.ADMIN_REJECT_REASON.format(id=tid), reply_markup=K.admin_reject_reasons(tid))
-    await cb.answer()
+    # نبدّل أزرار البطاقة نفسها بقائمة الأسباب (بلا رسالة جديدة — يعمل في القناة والخاص)
+    try:
+        await cb.message.edit_reply_markup(reply_markup=K.admin_reject_reasons(tid))
+    except Exception:  # noqa: BLE001
+        await cb.message.answer(T.ADMIN_REJECT_REASON.format(id=tid), reply_markup=K.admin_reject_reasons(tid))
+    await cb.answer("اختر السبب 👇")
 
 
 @router.callback_query(F.data.regexp(r"^adm:top:(\d+):no:(\w+)$"))
@@ -178,19 +204,17 @@ async def cb_reject_reason(cb: CallbackQuery, state: FSMContext) -> None:
     parts = cb.data.split(":")
     tid, code = int(parts[2]), parts[4]
     if code == "custom":
-        await state.set_state(AdminTopup.reject_reason)
-        await state.update_data(tid=tid)
-        await cb.message.edit_text(T.ADMIN_REJECT_CUSTOM, reply_markup=K.cancel_input(f"adm:top:{tid}:view"))
-        await cb.answer()
+        await C.ask_input(cb, state, AdminTopup.reject_reason, {"tid": tid}, T.ADMIN_REJECT_CUSTOM,
+                          K.cancel_input("adm:cancel_input"))
         return
     reason = dict(T.REJECT_REASONS).get(code, code)
     row = await topups_repo.reject(tid, cb.from_user.id, reason)
     if not row:
         await cb.answer(T.ADMIN_ALREADY_DECIDED, show_alert=True)
+        await notify.refresh_admin_cards(cb.bot, tid)
         return
-    await cb.message.edit_text(f"❌ رُفض #TOP-{tid}: {reason}", reply_markup=K.admin_back())
-    await cb.answer("تم الرفض")
-    await _finish(cb, cb.bot, tid, True, None, row)
+    await cb.answer("تم الرفض ❌")
+    await _finish(cb, cb.bot, tid, True, None, row)   # يحدّث البطاقة نفسها بالنتيجة ويزيل الأزرار
 
 
 @router.message(AdminTopup.reject_reason, F.text)
@@ -205,7 +229,7 @@ async def msg_reject_reason(message: Message, state: FSMContext) -> None:
     if not row:
         await message.answer(T.ADMIN_ALREADY_DECIDED)
         return
-    await message.answer(f"❌ رُفض #TOP-{tid}: {notify.esc(message.text.strip())}", reply_markup=K.admin_back())
+    await message.answer(f"❌ رُفض #TOP-{tid}: {notify.esc(message.text.strip())}")
     await _finish(message, message.bot, tid, True, None, row)
 
 
@@ -218,11 +242,9 @@ async def cb_message_user(cb: CallbackQuery, state: FSMContext) -> None:
     if not row:
         await cb.answer()
         return
-    await state.set_state(AdminTopup.message_user)
-    await state.update_data(uid=row["user_id"], tid=tid)
-    await cb.message.answer(f"✍️ اكتب رسالتك للعميل {notify.esc(row['user_name'])} بخصوص #TOP-{tid}:",
-                            reply_markup=K.cancel_input(f"adm:top:{tid}:view"))
-    await cb.answer()
+    await C.ask_input(cb, state, AdminTopup.message_user, {"uid": row["user_id"], "tid": tid},
+                      f"✍️ اكتب رسالتك للعميل {notify.esc(row['user_name'])} بخصوص #TOP-{tid}:",
+                      K.cancel_input("adm:cancel_input"))
 
 
 @router.message(AdminTopup.message_user, F.text)

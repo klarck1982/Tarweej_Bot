@@ -9,6 +9,7 @@ from aiogram.types import CallbackQuery, Message
 
 from app.bot import keyboards as K
 from app.bot import texts as T
+from app.bot.handlers.admin import _common as C
 from app.config import settings
 from app.db.repo import events, orders as repo, settings as settings_repo
 from app.services import nour, order_notify as ON, orders as orders_svc, pricing as P
@@ -62,9 +63,10 @@ async def _send_card(cb: CallbackQuery, oid: int, edit: bool = False) -> None:
             return
         except Exception:  # noqa: BLE001
             pass
-    m = await cb.message.answer(text, reply_markup=kb)
+    dest = cb.from_user.id if C.in_channel(cb) else cb.message.chat.id
+    m = await cb.bot.send_message(dest, text, reply_markup=kb)
     ids = list(o.get("admin_msg_ids") or [])
-    ids.append([cb.from_user.id, m.message_id])
+    ids.append([dest, m.message_id])
     await repo.set_messages(oid, admin_msg_ids=ids[-6:])
 
 
@@ -77,8 +79,12 @@ async def cb_view(cb: CallbackQuery) -> None:
 @router.callback_query(F.data.regexp(r"^adm:ord:(\d+):media$"))
 async def cb_media(cb: CallbackQuery) -> None:
     from app.bot.handlers.orders import send_media
-    await send_media(cb, int(cb.data.split(":")[2]))
-    await cb.answer()
+    # من داخل القناة: الملفات تُرسل إلى خاصّ الأدمن حتى لا تزدحم القناة
+    await send_media(cb, int(cb.data.split(":")[2]), dest=cb.from_user.id if C.in_channel(cb) else None)
+    if C.in_channel(cb):
+        await cb.answer("📎 أُرسلت إلى خاصّك")
+    else:
+        await cb.answer()
 
 
 # ───────────── إعادة الإرسال / المزامنة ─────────────
@@ -133,11 +139,9 @@ async def cb_refund(cb: CallbackQuery, state: FSMContext) -> None:
     if not o or o["status"] in repo.FINAL_STATUSES or o["status"] == "awaiting_payment":
         await cb.answer("هذا الطلب مغلق", show_alert=True)
         return
-    await state.set_state(AdminOrder.refund_reason)
-    await state.update_data(oid=oid)
-    await cb.message.answer(T.ADMIN_ORDER_REFUND_CONFIRM.format(price=fmt(o["price_usd"] - o.get("refunded_usd", 0)), id=oid),
-                            reply_markup=K.cancel_input(f"adm:ord:{oid}:view"))
-    await cb.answer()
+    await C.ask_input(cb, state, AdminOrder.refund_reason, {"oid": oid},
+                      T.ADMIN_ORDER_REFUND_CONFIRM.format(price=fmt(o["price_usd"] - o.get("refunded_usd", 0)), id=oid),
+                      K.cancel_input("adm:cancel_input"))
 
 
 @router.message(AdminOrder.refund_reason, F.text)
@@ -151,7 +155,7 @@ async def msg_refund(message: Message, state: FSMContext) -> None:
     if not o:
         await message.answer("لم يُنفَّذ الاسترداد (الطلب مغلق أو مُسترد سابقاً).")
         return
-    await message.answer(f"↩️ أُعيد {fmt(o['refunded_usd'])} للعميل — #ORD-{o['id']} مغلق.", reply_markup=K.admin_back())
+    await message.answer(f"↩️ أُعيد {fmt(o['refunded_usd'])} للعميل — #ORD-{o['id']} مغلق.")
     await ON.push_user_status(message.bot, o, reason=message.text.strip())
     await ON.refresh_admin_cards(message.bot, o["id"])
 
@@ -165,11 +169,9 @@ async def cb_msg(cb: CallbackQuery, state: FSMContext) -> None:
     if not o:
         await cb.answer()
         return
-    await state.set_state(AdminOrder.message_user)
-    await state.update_data(uid=o["user_id"], oid=oid)
-    await cb.message.answer(f"✍️ اكتب رسالتك للعميل {ON.esc(o.get('user_name'))} بخصوص #ORD-{oid}:",
-                            reply_markup=K.cancel_input(f"adm:ord:{oid}:view"))
-    await cb.answer()
+    await C.ask_input(cb, state, AdminOrder.message_user, {"uid": o["user_id"], "oid": oid},
+                      f"✍️ اكتب رسالتك للعميل {ON.esc(o.get('user_name'))} بخصوص #ORD-{oid}:",
+                      K.cancel_input("adm:cancel_input"))
 
 
 @router.message(AdminOrder.message_user, F.text)
