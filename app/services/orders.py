@@ -39,13 +39,27 @@ NOUR_TO_LOCAL = {
 }
 STATUS_ICON = {
     "awaiting_payment": "💤", "paid": "📨", "submitted": "🟡", "in_progress": "🔵", "active": "🟢",
-    "paused": "⏸️", "completed": "✅", "rejected": "❌", "failed_submit": "⚠️", "refunded": "↩️", "cancelled": "🚫",
+    "paused": "⏸️", "needs_revision": "✏️", "completed": "✅", "rejected": "❌", "failed_submit": "⚠️", "refunded": "↩️", "cancelled": "🚫",
 }
 STATUS_NAME = {
     "awaiting_payment": "بانتظار الدفع", "paid": "قيد الإرسال", "submitted": "قيد المراجعة", "in_progress": "قيد التجهيز",
-    "active": "يعمل الآن", "paused": "متوقف مؤقتاً", "completed": "مكتمل", "rejected": "مرفوض — مُسترد",
+    "active": "يعمل الآن", "paused": "متوقف مؤقتاً", "needs_revision": "بانتظار تعديلك", "completed": "مكتمل", "rejected": "مرفوض — مُسترد",
     "failed_submit": "تعذّر الإرسال — مُسترد", "refunded": "مُسترد", "cancelled": "ملغى",
 }
+# أسماء الحالات الخاصة بإعلانات تيليغرام (نفس الرموز، صياغة أدق للعميل)
+TG_ADS_STATUS_NAME = {
+    "submitted": "قيد المراجعة", "in_progress": "أُنشئ — بمراجعة تيليغرام", "active": "يعمل الآن",
+    "needs_revision": "النص يحتاج تعديلاً", "rejected": "رفضه تيليغرام — مُسترد",
+}
+KIND_NAME = {"meta_campaign": "إعلان فيسبوك/إنستغرام", "tg_ads": "إعلان Telegram Ads", "tg_post": "نشر في قناة شريكة"}
+KIND_EMOJI = {"meta_campaign": "📢", "tg_ads": "📣", "tg_post": "📝"}
+
+
+def status_name(order: dict) -> str:
+    st = order["status"]
+    if order.get("kind") == "tg_ads":
+        return TG_ADS_STATUS_NAME.get(st, STATUS_NAME.get(st, st))
+    return STATUS_NAME.get(st, st)
 
 
 def status_label(status: str) -> str:
@@ -56,6 +70,8 @@ def status_label(status: str) -> str:
 
 def compute_prices(spec: dict) -> tuple[Decimal, Decimal, Decimal]:
     """يعيد (الميزانية، سعر العميل، تكلفتنا) من spec — بما فيها الإضافات (نص إعلاني)."""
+    if spec.get("kind") == "tg_ads":
+        return P.tg_ads_quote(spec["budget"], copy_addon="copy" in (spec.get("addons") or []))
     daily = Decimal(str(spec["daily"]))
     days = int(spec["days"])
     budget, price, cost = P.meta_custom_price(daily, days)
@@ -100,33 +116,40 @@ def build_nour_payload(order: dict, fallback_username: str) -> dict:
 # ───────────── التأكيد (الخصم) ─────────────
 
 async def confirm(user_id: int, spec: dict, draft_id: int | None = None) -> dict:
-    """يخصم السعر وينشئ الطلب paid في معاملة واحدة. يرفع InsufficientBalance بلا أي أثر إن لم يكفِ الرصيد."""
+    """يخصم السعر وينشئ الطلب paid في معاملة واحدة. يرفع InsufficientBalance بلا أي أثر إن لم يكفِ الرصيد.
+
+    الطلبات اليدوية (tg_ads) تُنشأ مباشرة بحالة submitted — لا يوجد شريك يُرسل إليه، الأدمن ينفّذها بيده."""
     budget, price, cost = compute_prices(spec)
     spec = {**spec, "budget": str(budget), "price": str(price), "cost": str(cost)}
+    kind = spec.get("kind") or "meta_campaign"
+    manual = kind != "meta_campaign"
+    init_status = "submitted" if manual else "paid"
     import json
     async with db.pool().acquire() as c:
         async with c.transaction():
             if draft_id:
                 row = await c.fetchrow(
-                    "UPDATE orders SET status = 'paid', spec = $2::jsonb, price_usd = $3, cost_usd = $4, paid_at = now(), "
+                    "UPDATE orders SET status = $6, kind = $7, spec = $2::jsonb, price_usd = $3, cost_usd = $4, paid_at = now(), "
+                    "submitted_at = CASE WHEN $6 = 'submitted' THEN now() ELSE NULL END, "
                     "expires_at = NULL, updated_at = now(), idempotency_key = 'ord-' || id "
                     "WHERE id = $1 AND user_id = $5 AND status = 'awaiting_payment' RETURNING *",
-                    draft_id, json.dumps(spec, ensure_ascii=False), price, cost, user_id,
+                    draft_id, json.dumps(spec, ensure_ascii=False), price, cost, user_id, init_status, kind,
                 )
             else:
                 row = None
             if row is None:
                 row = await c.fetchrow(
-                    "INSERT INTO orders (user_id, kind, status, spec, price_usd, cost_usd, paid_at) "
-                    "VALUES ($1, 'meta_campaign', 'paid', $2::jsonb, $3, $4, now()) RETURNING *",
-                    user_id, json.dumps(spec, ensure_ascii=False), price, cost,
+                    "INSERT INTO orders (user_id, kind, status, spec, price_usd, cost_usd, paid_at, submitted_at) "
+                    "VALUES ($1, $5, $6, $2::jsonb, $3, $4, now(), CASE WHEN $6 = 'submitted' THEN now() END) RETURNING *",
+                    user_id, json.dumps(spec, ensure_ascii=False), price, cost, kind, init_status,
                 )
                 await c.execute("UPDATE orders SET idempotency_key = 'ord-' || id WHERE id = $1", row["id"])
             # الخصم — يرفع InsufficientBalance فتُلغى المعاملة كلها (الطلب لا يُنشأ)
+            what = KIND_NAME.get(kind, kind) if manual else f"إعلان {TG.PLATFORM_NAME.get(spec.get('platform'), '')}"
             await money_svc.debit(user_id, price, "order_charge", ref_type="order", ref_id=row["id"],
-                                  note=f"ORD-{row['id']} إعلان {TG.PLATFORM_NAME.get(spec['platform'], '')}", conn=c)
+                                  note=f"ORD-{row['id']} {what}", conn=c)
     order = await repo.get(row["id"])
-    await events.log_event("order_paid", user_id, order["id"], price=str(price), cost=str(cost))
+    await events.log_event("order_paid", user_id, order["id"], price=str(price), cost=str(cost), kind=kind)
     return order
 
 
@@ -135,7 +158,7 @@ async def confirm(user_id: int, spec: dict, draft_id: int | None = None) -> dict
 async def submit(order_id: int) -> dict:
     """يرسل الطلب إلى نور (أو المحاكاة). يعيد الطلب المحدَّث. لا يرمي استثناءات — النتيجة في status/note."""
     order = await repo.get(order_id)
-    if not order or order["status"] != "paid":
+    if not order or order["status"] != "paid" or order.get("kind") != "meta_campaign":
         return order
     fallback = await settings_repo.get("admin_fallback_username", "") or ""
     payload = build_nour_payload(order, fallback)
@@ -262,3 +285,51 @@ async def sync_one(order_id: int) -> tuple[dict | None, bool]:
         log.warning("sync ORD-%s failed: %s", order_id, e)
         return order, False
     return await apply_nour_status(order_id, res.get("status") or "", res.get("raw"))
+
+
+# ═══════════════ الطلبات اليدوية (Telegram Ads) — انتقالات الأدمن ═══════════════
+
+# ما يُسمح للأدمن بالانتقال إليه من كل حالة
+MANUAL_TRANSITIONS = {
+    "submitted":      ("in_progress", "needs_revision", "rejected"),
+    "in_progress":    ("active", "needs_revision", "rejected"),
+    "needs_revision": ("in_progress", "rejected"),
+    "active":         ("completed", "paused"),
+    "paused":         ("active", "completed"),
+}
+
+
+async def manual_transition(order_id: int, to: str, admin_id: int, note: str | None = None,
+                            results: dict | None = None) -> tuple[dict | None, bool]:
+    """ينقل طلباً يدوياً إلى حالة جديدة. الرفض = استرداد كامل تلقائي. يعيد (الطلب، هل تغيّر؟)."""
+    order = await repo.get(order_id)
+    if not order or to not in MANUAL_TRANSITIONS.get(order["status"], ()):
+        return order, False
+    now = datetime.now(timezone.utc)
+    if to == "rejected":
+        await refund(order_id, reason=note or "رفض تيليغرام الإعلان — أُعيد المبلغ كاملاً", new_status="rejected", admin_id=admin_id)
+        await repo.update(order_id, nour_status="rejected", last_sync_at=now)
+        return await repo.get(order_id), True
+    fields: dict = dict(status=to, admin_id=admin_id, last_sync_at=now)
+    if to == "needs_revision":
+        fields["revision_note"] = (note or "")[:300]
+    if to == "active" and not order.get("started_at"):
+        fields["started_at"] = now
+    if to == "completed":
+        fields["completed_at"] = now
+        if results:
+            fields["results"] = results
+    updated = await repo.update(order_id, **fields)
+    await events.log_event("order_status", order["user_id"], order_id, from_=order["status"], to=to, admin_id=admin_id)
+    return updated, True
+
+
+async def apply_revision(order_id: int, user_id: int, new_text: str) -> dict | None:
+    """العميل أرسل نصاً بديلاً: نحدّث المواصفات ونعيد الطلب إلى قيد المراجعة."""
+    order = await repo.get(order_id)
+    if not order or order["user_id"] != user_id or order["status"] != "needs_revision":
+        return None
+    spec = {**order["spec"], "text": new_text, "text_prev": order["spec"].get("text")}
+    updated = await repo.update(order_id, status="submitted", spec=spec, revision_note=None, last_sync_at=datetime.now(timezone.utc))
+    await events.log_event("order_revised", user_id, order_id)
+    return updated

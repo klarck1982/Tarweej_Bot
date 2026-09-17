@@ -666,6 +666,11 @@ async def cb_resume(cb: CallbackQuery, state: FSMContext) -> None:
         await cb.answer(T.META_NO_DRAFT, show_alert=True)
         return
     spec = draft["spec"]
+    if draft.get("kind") == "tg_ads":
+        from app.bot.handlers.tg_ads_wizard import resume_draft
+        await resume_draft(cb, state, draft)
+        await cb.answer()
+        return
     await state.clear()
     await state.update_data(
         pkg=spec.get("pkg"), daily=spec["daily"], days=int(spec["days"]), platform=spec["platform"], goal=spec.get("goal"),

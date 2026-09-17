@@ -58,6 +58,8 @@ async def cb_orders(cb: CallbackQuery, state: FSMContext) -> None:
 
 def order_text(o: dict) -> str:
     spec = o["spec"]
+    if o.get("kind") == "tg_ads":
+        return tga_order_text(o)
     tl = []
     if o.get("submitted_at"):
         tl.append(f"أُرسل للتنفيذ: {ON._when(o['submitted_at'])}")
@@ -75,6 +77,27 @@ def order_text(o: dict) -> str:
     )
 
 
+def _timeline(o: dict) -> str:
+    tl = []
+    if o.get("started_at"):
+        tl.append(f"انطلق: {ON._when(o['started_at'])}")
+    if o.get("completed_at"):
+        tl.append(f"اكتمل: {ON._when(o['completed_at'])}")
+    return ("\n🕒 " + " · ".join(tl)) if tl else ""
+
+
+def tga_order_text(o: dict) -> str:
+    spec = o["spec"]
+    text = spec.get("text") or "يكتبه فريقنا ✍️"
+    return T.ORDER_VIEW_TGA.format(
+        icon=orders_svc.STATUS_ICON.get(o["status"], "•"), id=o["id"], status=orders_svc.status_name(o),
+        budget=fmt(spec.get("budget", 0)), price=fmt(o["price_usd"]), targeting=ON.esc(TG.tga_targeting_label(spec)),
+        text=ON.esc(text), link=ON.esc(spec.get("link")) or "—", created=ON._when(o.get("created_at")),
+        timeline=_timeline(o), results=ON.tga_results_line(o),
+        hint=T.TGA_HINTS.get(o["status"], T.ORDER_HINTS.get(o["status"], "")),
+    )
+
+
 @router.callback_query(F.data.startswith("ord:view:"))
 async def cb_view(cb: CallbackQuery, state: FSMContext) -> None:
     oid = int(cb.data.split(":")[2])
@@ -85,10 +108,11 @@ async def cb_view(cb: CallbackQuery, state: FSMContext) -> None:
     await state.clear()
     o["media_count"] = len(await repo.media(oid))
     text = order_text(o)
+    kb = K.tga_revision(oid) if (o.get("kind") == "tg_ads" and o["status"] == "needs_revision") else K.order_view(o)
     try:
-        await cb.message.edit_text(text, reply_markup=K.order_view(o))
+        await cb.message.edit_text(text, reply_markup=kb)
     except Exception:  # noqa: BLE001
-        await cb.message.answer(text, reply_markup=K.order_view(o))
+        await cb.message.answer(text, reply_markup=kb)
     await cb.answer()
 
 
@@ -149,6 +173,11 @@ async def cb_renew(cb: CallbackQuery, state: FSMContext) -> None:
         await cb.answer()
         return
     spec = o["spec"]
+    if o.get("kind") == "tg_ads":
+        from app.bot.handlers.tg_ads_wizard import renew_from
+        await renew_from(cb, state, o)
+        await cb.answer("🔁 نفس الإعدادات — راجع وأكّد")
+        return
     from app.bot.handlers.meta_wizard import _show_summary
     from app.services import validators as V
     await state.clear()

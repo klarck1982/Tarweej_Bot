@@ -22,8 +22,9 @@ from decimal import Decimal
 from app.db import pool as db
 from app.services.pricing import money
 
-OPEN_STATUSES = ("paid", "submitted", "in_progress", "active", "paused")
+OPEN_STATUSES = ("paid", "submitted", "in_progress", "active", "paused", "needs_revision")
 FINAL_STATUSES = ("completed", "rejected", "failed_submit", "refunded", "cancelled")
+KINDS = ("meta_campaign", "tg_ads", "tg_post", "copy", "design", "reel", "montage", "bundle")
 
 
 def _j(v):
@@ -40,7 +41,7 @@ def row_to_dict(row) -> dict | None:
     if row is None:
         return None
     d = dict(row)
-    for k in ("spec", "nour_payload", "nour_response", "admin_msg_ids"):
+    for k in ("spec", "nour_payload", "nour_response", "admin_msg_ids", "results"):
         if k in d:
             d[k] = _j(d[k]) or ({} if k != "admin_msg_ids" else [])
     return d
@@ -88,13 +89,16 @@ async def count_open() -> int:
 
 
 async def count_attention(dry_run: bool) -> int:
-    """ما ينتظر تدخّل الأدمن: عالق قبل نور، أو (في المحاكاة) ينتظر «قرار نور» بالأزرار."""
+    """ما ينتظر تدخّل الأدمن: عالق قبل نور، (في المحاكاة) ينتظر «قرار نور»، وكل طلب تيليغرام يدوي مفتوح."""
     statuses = ["paid"] + (["submitted", "in_progress", "active"] if dry_run else [])
-    return int(await db.fetchval("SELECT count(*) FROM orders WHERE status = ANY($1::text[])", statuses) or 0)
+    meta = int(await db.fetchval("SELECT count(*) FROM orders WHERE kind = 'meta_campaign' AND status = ANY($1::text[])", statuses) or 0)
+    manual = int(await db.fetchval(
+        "SELECT count(*) FROM orders WHERE kind <> 'meta_campaign' AND status IN ('paid','submitted','in_progress','active')") or 0)
+    return meta + manual
 
 
 async def save_awaiting(user_id: int, spec: dict, price: Decimal, cost: Decimal, days_valid: int,
-                        order_id: int | None = None) -> dict:
+                        order_id: int | None = None, kind: str = "meta_campaign") -> dict:
     """يحفظ/يحدّث المسودة بانتظار الدفع. مسودة واحدة لكل مستخدم — القديمة تُلغى."""
     async with db.pool().acquire() as c:
         async with c.transaction():
@@ -105,17 +109,17 @@ async def save_awaiting(user_id: int, spec: dict, price: Decimal, cost: Decimal,
             )
             if order_id:
                 row = await c.fetchrow(
-                    "UPDATE orders SET spec = $2::jsonb, price_usd = $3, cost_usd = $4, "
+                    "UPDATE orders SET spec = $2::jsonb, price_usd = $3, cost_usd = $4, kind = $7, "
                     "expires_at = now() + ($5 || ' days')::interval, updated_at = now() "
                     "WHERE id = $1 AND user_id = $6 AND status = 'awaiting_payment' RETURNING *",
-                    order_id, json.dumps(spec, ensure_ascii=False), money(price), money(cost), str(days_valid), user_id,
+                    order_id, json.dumps(spec, ensure_ascii=False), money(price), money(cost), str(days_valid), user_id, kind,
                 )
                 if row:
                     return row_to_dict(row)
             row = await c.fetchrow(
                 "INSERT INTO orders (user_id, kind, status, spec, price_usd, cost_usd, expires_at) "
-                "VALUES ($1, 'meta_campaign', 'awaiting_payment', $2::jsonb, $3, $4, now() + ($5 || ' days')::interval) RETURNING *",
-                user_id, json.dumps(spec, ensure_ascii=False), money(price), money(cost), str(days_valid),
+                "VALUES ($1, $6, 'awaiting_payment', $2::jsonb, $3, $4, now() + ($5 || ' days')::interval) RETURNING *",
+                user_id, json.dumps(spec, ensure_ascii=False), money(price), money(cost), str(days_valid), kind,
             )
             return row_to_dict(row)
 
@@ -157,8 +161,9 @@ async def update(order_id: int, **fields) -> dict | None:
         return await get(order_id)
     sets, args = [], [order_id]
     for k, v in fields.items():
-        args.append(json.dumps(v, ensure_ascii=False, default=str) if k in ("nour_payload", "nour_response", "spec") else v)
-        cast = "::jsonb" if k in ("nour_payload", "nour_response", "spec") else ""
+        is_json = k in ("nour_payload", "nour_response", "spec", "results")
+        args.append(json.dumps(v, ensure_ascii=False, default=str) if is_json else v)
+        cast = "::jsonb" if is_json else ""
         sets.append(f"{k} = ${len(args)}{cast}")
     sets.append("updated_at = now()")
     row = await db.fetchrow(f"UPDATE orders SET {', '.join(sets)} WHERE id = $1 RETURNING *", *args)
@@ -167,7 +172,8 @@ async def update(order_id: int, **fields) -> dict | None:
 
 async def due_for_retry(limit: int = 10) -> list[dict]:
     rows = await db.fetch(
-        "SELECT * FROM orders WHERE status = 'paid' AND (next_retry_at IS NULL OR next_retry_at <= now()) ORDER BY id LIMIT $1",
+        "SELECT * FROM orders WHERE kind = 'meta_campaign' AND status = 'paid' "
+        "AND (next_retry_at IS NULL OR next_retry_at <= now()) ORDER BY id LIMIT $1",
         limit,
     )
     return [row_to_dict(r) for r in rows]

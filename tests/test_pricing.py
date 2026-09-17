@@ -86,3 +86,14 @@ def test_fmt_and_days_word():
     assert P.days_word(2) == "يومان"
     assert P.days_word(7) == "7 أيام"
     assert P.days_word(14) == "14 يوماً"
+
+
+def test_tg_ads_quote():
+    b, price, cost = P.tg_ads_quote(25)
+    assert (b, price, cost) == (Decimal("25.00"), Decimal("33.75"), Decimal("25.00"))
+    b, price, cost = P.tg_ads_quote(10, copy_addon=True)
+    assert price == Decimal("18.50") and cost == Decimal("10.00")
+    with pytest.raises(ValueError):
+        P.tg_ads_quote(9)
+    with pytest.raises(ValueError):
+        P.tg_ads_quote(501)

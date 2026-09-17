@@ -29,6 +29,8 @@ def _when(dt: datetime | None) -> str:
 
 
 def pkg_label(spec: dict) -> str:
+    if spec.get("kind") == "tg_ads":
+        return f"📣 تيليغرام {fmt(spec.get('budget', 0))}"
     code = spec.get("pkg")
     if code in P.META_BY_CODE:
         p = P.META_BY_CODE[code]
@@ -42,7 +44,45 @@ def geo_label(spec: dict) -> str:
     return f"{TG.country_label(spec.get('country', ''))} — {TG.provinces_label(spec.get('country', ''), spec.get('provinces'))}"
 
 
+def tga_results_line(order: dict) -> str:
+    r = order.get("results") or {}
+    if not r:
+        return ""
+    return T.TGA_RESULTS_LINE.format(views=f"{int(r.get('views', 0)):,}", clicks=f"{int(r.get('clicks', 0)):,}")
+
+
+async def admin_tga_card_text(order: dict) -> str:
+    spec = order["spec"]
+    uname = f"@{order['user_username']}" if order.get("user_username") else ""
+    margin = P.money(order["price_usd"] - order["cost_usd"])
+    if "copy" in (spec.get("addons") or []):
+        addons = "\n✍️ نص إعلاني (+5$) — <b>كتبه الفريق ✅</b>" if spec.get("text") else "\n✍️ <b>مطلوب: كتابة النص</b> (+5$) — اكتبه قبل إنشاء الإعلان"
+    else:
+        addons = ""
+    revision = f"\n✏️ طلب تعديل: <i>{esc(order['revision_note'])}</i>" if order.get("revision_note") else ""
+    prev = f"\n<s>{esc(spec['text_prev'])}</s>" if spec.get("text_prev") else ""
+    note = f"\n📌 <i>{esc(order['note'])}</i>" if order.get("note") else ""
+    text = spec.get("text") or "— (لم يُكتب بعد — اضغط «أدخل النص الذي كتبته»)"
+    n_label = f"{len(spec['text'])} حرفاً" if spec.get("text") else "مطلوب"
+    return T.ADMIN_TGA_CARD.format(
+        icon=orders_svc.STATUS_ICON.get(order["status"], "•"), id=order["id"], status=orders_svc.status_name(order),
+        name=esc(order.get("user_name")), username=esc(uname), uid=order["user_id"],
+        budget=fmt(spec["budget"]), price=fmt(order["price_usd"]), margin=fmt(margin),
+        targeting=esc(TG.tga_targeting_label(spec)), n=n_label, text=esc(text) + prev,
+        link=esc(spec.get("link")), addons=addons, revision=revision, results=tga_results_line(order),
+        created=_when(order.get("paid_at") or order.get("created_at")), note=note,
+    )
+
+
+def admin_card_kb(order: dict, media_count: int, in_channel: bool):
+    if order.get("kind") == "tg_ads":
+        return K.admin_tga_card(order, in_channel=in_channel)
+    return K.admin_order_card(order, nour.is_dry_run(), media_count, in_channel=in_channel)
+
+
 async def admin_card_text(order: dict, media_count: int) -> str:
+    if order.get("kind") == "tg_ads":
+        return await admin_tga_card_text(order)
     spec = order["spec"]
     charged = f" · خصم فعلي <b>{fmt(order['charged_usd'])}</b>" if order.get("charged_usd") is not None else ""
     margin = P.money(order["price_usd"] - (order.get("charged_usd") if order.get("charged_usd") is not None else order["cost_usd"]))
@@ -76,7 +116,7 @@ async def notify_admins_new_order(bot: Bot, order_id: int) -> None:
     text = await admin_card_text(order, media_count)
     targets = await channels.chat_ids_for("orders")
     to_channel = bool(targets) and channels.is_channel_chat(targets[0])
-    kb = K.admin_order_card(order, nour.is_dry_run(), media_count, in_channel=to_channel)
+    kb = admin_card_kb(order, media_count, to_channel)
     msg_ids = await channels.send(bot, "orders", text, kb)
     if msg_ids:
         await repo.set_messages(order_id, admin_msg_ids=msg_ids)
@@ -96,7 +136,7 @@ async def refresh_admin_cards(bot: Bot, order_id: int) -> None:
     for pair in order.get("admin_msg_ids") or []:
         try:
             chat_id, message_id = pair
-            kb = K.admin_order_card(order, nour.is_dry_run(), media_count, in_channel=channels.is_channel_chat(chat_id))
+            kb = admin_card_kb(order, media_count, channels.is_channel_chat(chat_id))
             await bot.edit_message_text(text, chat_id=chat_id, message_id=message_id, reply_markup=kb)
         except Exception as e:  # noqa: BLE001 — لم يتغير / قديمة
             log.debug("refresh order card failed %s: %s", pair, e)
@@ -108,15 +148,32 @@ async def notify_admins_text(bot: Bot, text: str) -> None:
 
 
 async def push_user_status(bot: Bot, order: dict, reason: str | None = None) -> None:
-    """رسالة للعميل عند تغيّر الحالة (إن كان لها قالب)."""
-    tpl = T.ORDER_STATUS_PUSH.get(order["status"])
-    if not tpl:
-        return
+    """رسالة للعميل عند تغيّر الحالة (إن كان لها قالب) — قوالب مختلفة لكل نوع طلب."""
     spec = order["spec"]
+    st = order["status"]
     balance = await users_repo.get_balance(order["user_id"])
-    text = tpl.format(id=order["id"], wa=spec.get("whatsapp", ""), platform=TG.PLATFORM_NAME.get(spec.get("platform"), ""),
-                      days=P.days_word(spec.get("days") or 0), price=fmt(order["price_usd"]), balance=fmt(balance), reason=esc(reason or order.get("note")))
+    kb = K.order_view({**order, "media_count": 0})
+    if order.get("kind") == "tg_ads":
+        if st == "needs_revision":
+            text = T.TGA_REVISION_PROMPT.format(id=order["id"], reason=esc(order.get("revision_note") or reason or "—"),
+                                                text=esc(spec.get("text") or "—"))
+            kb = K.tga_revision(order["id"])
+        else:
+            tpl = T.TGA_STATUS_PUSH.get(st) or (T.ORDER_STATUS_PUSH.get(st) if st in ("refunded", "failed_submit") else None)
+            if not tpl:
+                return
+            from app.db.repo import settings as settings_repo
+            hours = str(await settings_repo.get("tg_ads_review_hours", "1 – 24"))
+            text = tpl.format(id=order["id"], budget=fmt(spec.get("budget", 0)), price=fmt(order["price_usd"]), balance=fmt(balance),
+                              reason=esc(reason or order.get("note") or "—"), hours=hours, results=tga_results_line(order))
+    else:
+        tpl = T.ORDER_STATUS_PUSH.get(st)
+        if not tpl:
+            return
+        text = tpl.format(id=order["id"], wa=spec.get("whatsapp", ""), platform=TG.PLATFORM_NAME.get(spec.get("platform"), ""),
+                          days=P.days_word(spec.get("days") or 0), price=fmt(order["price_usd"]), balance=fmt(balance),
+                          reason=esc(reason or order.get("note")))
     try:
-        await bot.send_message(order["user_id"], text, reply_markup=K.order_view({**order, "media_count": 0}))
+        await bot.send_message(order["user_id"], text, reply_markup=kb)
     except Exception as e:  # noqa: BLE001 — حظر البوت
         log.warning("cannot push status to user %s: %s", order["user_id"], e)

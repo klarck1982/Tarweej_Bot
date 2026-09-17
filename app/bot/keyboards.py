@@ -118,8 +118,8 @@ def meta_diff_back() -> InlineKeyboardMarkup:
 
 def tg_tracks(ads_on: bool = True, post_on: bool = True) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
-        [ib("📣 إعلان Telegram Ads الرسمي" + ("" if ads_on else " 🔒"), "tga:start")],
-        [ib("📝 نشر في قنوات شريكة" + ("" if post_on else " 🔒"), "tgp:start")],
+        [ib("📣 إعلان Telegram Ads الرسمي" + ("" if ads_on else " 🔒"), "tga:start", "primary" if ads_on else None)],
+        [ib("📝 نشر في قنوات شريكة — قريباً 🔒", "tgp:start")],
         [ib("🏠 القائمة", "nav:home")],
     ])
 
@@ -640,6 +640,122 @@ def admin_order_card(order: dict, dry_run: bool, media_count: int = 0, in_channe
         rows.append([ib(f"📎 ملفات العميل ({media_count})", f"adm:ord:{oid}:media")])
     rows.append([ib("💬 مراسلة العميل", f"adm:ord:{oid}:msg")])
     if st in ("paid", "submitted", "in_progress", "active", "paused"):
+        rows.append([ib("↩️ استرداد كامل وإغلاق", f"adm:ord:{oid}:refund", "danger")])
+    if not in_channel:
+        rows.append([ib("◀️ الطلبات", "adm:orders")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+# ═══════════════════════════ 📣 Telegram Ads — المعالج ═══════════════════════════
+
+def _tga_nav(back: str | None = None) -> list[list[InlineKeyboardButton]]:
+    return _nav(back, cancel="tga:cancel")
+
+
+def tga_budget() -> InlineKeyboardMarkup:
+    b = InlineKeyboardBuilder()
+    btns = [ib(f"{p}$ → {P.fmt(P.tg_ads_price(p))}", f"tga:budget:{p}", "primary" if p == P.TG_ADS_PRESETS[1] else None)
+            for p in P.TG_ADS_PRESETS]
+    b.row(*btns[:2]); b.row(*btns[2:4]); b.row(btns[4])
+    for r in _tga_nav("nav:tg"):
+        b.row(*r)
+    return b.as_markup()
+
+
+def tga_target_mode() -> InlineKeyboardMarkup:
+    rows = [[ib(TG.TGA_MODES["channels"], "tga:mode:channels", "primary")],
+            [ib(TG.TGA_MODES["interests"], "tga:mode:interests")],
+            [ib(TG.TGA_MODES["geo"], "tga:mode:geo")],
+            [ib(TG.TGA_MODES["expert"], "tga:mode:expert")]]
+    rows += _tga_nav("tga:back:budget")
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def tga_interests(selected: list[str]) -> InlineKeyboardMarkup:
+    b = InlineKeyboardBuilder()
+    btns = [ib(("✅ " if k in selected else "") + name, f"tga:int:{k}", "success" if k in selected else None)
+            for k, name in TG.TGA_INTERESTS]
+    for i in range(0, len(btns), 2):
+        b.row(*btns[i:i + 2])
+    b.row(ib(f"✔️ تم ({len(selected)})" if selected else "✔️ تم — اختر واحداً على الأقل", "tga:int_done", "primary"))
+    for r in _tga_nav("tga:back:mode"):
+        b.row(*r)
+    return b.as_markup()
+
+
+def tga_country(more: bool = False) -> InlineKeyboardMarkup:
+    codes = TG.OTHER_COUNTRIES if more else TG.MAIN_COUNTRIES
+    b = InlineKeyboardBuilder()
+    btns = [ib(TG.country_label(c), f"tga:ctry:{c}", "primary" if c == "SY" and not more else None) for c in codes]
+    for i in range(0, len(btns), 2):
+        b.row(*btns[i:i + 2])
+    b.row(ib("🌍 كل الدول (عربي)", "tga:ctry:any"))
+    b.row(ib("◀️ الدول الرئيسية", "tga:ctry_page:0") if more else ib("🌐 دول أخرى", "tga:ctry_page:1"))
+    for r in _tga_nav("tga:back:mode"):
+        b.row(*r)
+    return b.as_markup()
+
+
+def tga_lang() -> InlineKeyboardMarkup:
+    rows = [[ib(name, f"tga:lang:{k}", "primary" if k == "ar" else None)] for k, name in TG.TGA_LANGS]
+    rows += _tga_nav("tga:back:country")
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def tga_text_step(back: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=_tga_nav(back))
+
+
+def tga_text_input(copy_price: str) -> InlineKeyboardMarkup:
+    rows = [[ib(f"✍️ اكتبولي النص (+{copy_price})", "tga:addon:copy", "success")]]
+    rows += _tga_nav("tga:back:mode")
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def tga_summary(price_ok: bool, price: str, gap: str | None = None) -> InlineKeyboardMarkup:
+    rows = []
+    if price_ok:
+        rows.append([ib(f"✅ تأكيد الطلب — {price}", "tga:confirm", "success")])
+    else:
+        rows.append([ib(f"➕ اشحن {gap} وأكمل", "meta:topup_gap", "success")])
+    rows.append([ib("✏️ تعديل", "tga:edit")])
+    rows.append([ib("❌ إلغاء", "tga:cancel", "danger")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def tga_edit_menu() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [ib("💵 الميزانية", "tga:back:budget"), ib("🎯 الاستهداف", "tga:back:mode")],
+        [ib("📝 النص", "tga:back:text"), ib("🔗 الرابط", "tga:back:link")],
+        [ib("◀️ رجوع للملخص", "tga:back:summary")],
+    ])
+
+
+def tga_revision(order_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [ib("✍️ إرسال نص جديد", f"tga:revise:{order_id}", "primary")],
+        [ib("💬 مساعدة بهذا الطلب", f"ord:help:{order_id}")],
+        [ib("◀️ طلباتي", "ord:list:1"), ib("🏠 القائمة", "nav:home")],
+    ])
+
+
+def admin_tga_card(order: dict, in_channel: bool = False) -> InlineKeyboardMarkup:
+    oid, st = order["id"], order["status"]
+    rows = []
+    nxt = {
+        "submitted":      [("▶️ أنشأته في Telegram Ads", "in_progress", "primary"), ("✏️ اطلب تعديل النص", "needs_revision", None), ("❌ رفض تيليغرام (استرداد)", "rejected", "danger")],
+        "in_progress":    [("🟢 وافق تيليغرام — انطلق", "active", "primary"), ("✏️ اطلب تعديل النص", "needs_revision", None), ("❌ رفض تيليغرام (استرداد)", "rejected", "danger")],
+        "needs_revision": [("❌ رفض نهائي (استرداد)", "rejected", "danger")],
+        "active":         [("✅ اكتمل — أدخل النتائج", "completed", "success"), ("⏸️ توقف مؤقتاً", "paused", None)],
+        "paused":         [("🟢 استُؤنف", "active", "primary"), ("✅ اكتمل — أدخل النتائج", "completed", "success")],
+    }.get(st, [])
+    spec = order.get("spec") or {}
+    if st in ("submitted", "needs_revision") and "copy" in (spec.get("addons") or []) and not spec.get("text"):
+        rows.append([ib("✍️ أدخل النص الذي كتبته", f"adm:tga:{oid}:text", "success")])
+    for label, code, style in nxt:
+        rows.append([ib(label, f"adm:tga:{oid}:to:{code}", style)])
+    rows.append([ib("💬 مراسلة العميل", f"adm:ord:{oid}:msg")])
+    if st in ("submitted", "in_progress", "needs_revision", "active", "paused"):
         rows.append([ib("↩️ استرداد كامل وإغلاق", f"adm:ord:{oid}:refund", "danger")])
     if not in_channel:
         rows.append([ib("◀️ الطلبات", "adm:orders")])

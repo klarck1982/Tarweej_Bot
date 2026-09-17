@@ -87,15 +87,11 @@ async def cb_nav_tg(cb: CallbackQuery, state: FSMContext) -> None:
     await _show(cb, T.TG_INTRO, K.tg_tracks(svc["tg_ads"], svc["tg_post"]))
 
 
-@router.callback_query(F.data.in_({"tga:start", "tgp:start"}))
-async def cb_tg_start(cb: CallbackQuery) -> None:
-    svc = await settings_repo.services()
-    key = "tg_ads" if cb.data == "tga:start" else "tg_post"
-    if not svc[key]:
-        await cb.answer(T.LOCKED_SERVICE, show_alert=True)
-        return
-    await events.log_event("tg_track_click", cb.from_user.id, track=key)
-    await cb.answer(T.COMING_STEP.format(step=5).replace("<b>", "").replace("</b>", ""), show_alert=True)
+@router.callback_query(F.data == "tgp:start")
+async def cb_tg_post_start(cb: CallbackQuery) -> None:
+    """القنوات الشريكة — تُبنى في التسليم التالي؛ الزر مقفول حتى تُضاف أول قناة."""
+    await events.log_event("tg_track_click", cb.from_user.id, track="tg_post")
+    await cb.answer(T.TGP_SOON, show_alert=True)
 
 
 # ───────────── 🎨 تصميم ─────────────

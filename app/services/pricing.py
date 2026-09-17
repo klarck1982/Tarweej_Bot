@@ -122,11 +122,26 @@ TG_POST_MULT = D("1.25")      # القنوات الشريكة: سعر القنا
 TG_POST_PIN_EXTRA = D("0.50")  # التثبيت +50%
 
 
+TG_ADS_MAX_BUDGET = D("500")
+TG_ADS_PRESETS = (10, 20, 35, 50, 100)
+
+
 def tg_ads_price(budget: Decimal | int | float) -> Decimal:
     b = D(str(budget))
     if b < TG_ADS_MIN_BUDGET:
         raise ValueError("الحد الأدنى لإعلان تيليغرام 10$")
+    if b > TG_ADS_MAX_BUDGET:
+        raise ValueError("الحد الأقصى لإعلان تيليغرام 500$")
     return money(b * TG_ADS_MULT)
+
+
+def tg_ads_quote(budget: Decimal | int | float, copy_addon: bool = False) -> tuple[Decimal, Decimal, Decimal]:
+    """يعيد (الميزانية، سعر العميل، تكلفتنا) — التكلفة = الميزانية نفسها (تُصرف TON من حسابك بقيمتها)."""
+    b = money(D(str(budget)))
+    price = tg_ads_price(b)
+    if copy_addon:
+        price += ADDONS["copy"]["price"]
+    return b, money(price), b
 
 
 def tg_post_price(channel_price: Decimal | int | float, pinned: bool = False) -> Decimal:

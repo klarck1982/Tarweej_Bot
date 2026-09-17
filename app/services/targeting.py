@@ -111,3 +111,39 @@ def validate_provinces(code: str, provinces: list[str]) -> list[str]:
     valid = {k for k, _ in PROVINCES[code]}
     clean = [p for p in provinces if p in valid]
     return clean or ["all"]
+
+
+# ═══════════════ Telegram Ads (المسار الرسمي) ═══════════════
+# مواضيع القنوات كما تصنّفها منصة Telegram Ads — نعرض أشهرها عربياً
+TGA_INTERESTS: tuple[tuple[str, str], ...] = (
+    ("shopping", "🛍️ تسوق"), ("business", "💼 أعمال ومال"), ("technology", "💻 تقنية"), ("education", "📚 تعليم"),
+    ("news", "📰 أخبار"), ("entertainment", "🎬 ترفيه"), ("sports", "⚽ رياضة"), ("health", "🩺 صحة وجمال"),
+    ("food", "🍽️ طعام ومطاعم"), ("real_estate", "🏠 عقارات"), ("travel", "✈️ سفر"), ("crypto", "🪙 كريبتو"),
+)
+TGA_INTEREST_NAME = dict(TGA_INTERESTS)
+TGA_MAX_INTERESTS = 5
+TGA_MAX_CHANNELS = 10
+TGA_LANGS: tuple[tuple[str, str], ...] = (("ar", "🇸🇦 العربية"), ("en", "🇬🇧 الإنجليزية"), ("any", "🌐 كل اللغات"))
+TGA_LANG_NAME = dict(TGA_LANGS)
+TGA_MODES = {
+    "channels": "📡 قنوات محددة",
+    "interests": "🏷️ حسب الاهتمامات",
+    "geo": "🌐 حسب الدولة واللغة",
+    "expert": "🤷 حسب خبرة الفريق",
+}
+
+
+def tga_targeting_label(spec: dict) -> str:
+    """سطر يصف استهداف إعلان تيليغرام — للملخص وبطاقة الأدمن."""
+    mode = spec.get("target_mode", "expert")
+    if mode == "channels":
+        chans = spec.get("channels") or []
+        return f"قنوات محددة ({len(chans)}): " + "، ".join(chans)
+    if mode == "interests":
+        names = [TGA_INTEREST_NAME.get(i, i) for i in (spec.get("interests") or [])]
+        return "اهتمامات: " + ("، ".join(names) if names else "—")
+    if mode == "geo":
+        c = spec.get("country") or "any"
+        country = country_label(c) if c in COUNTRY_BY_CODE else "🌍 كل الدول"
+        return f"{country} · {TGA_LANG_NAME.get(spec.get('language', 'ar'), '')}"
+    return "نختار القنوات الأنسب لك بخبرة الفريق"

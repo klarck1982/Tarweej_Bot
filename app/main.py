@@ -23,7 +23,7 @@ from aiohttp import web
 from app import STEP, VERSION
 from app.bot import texts as T
 from app.bot.fsm_storage import PostgresStorage
-from app.bot.handlers import fallback, menu, meta_wizard, orders, start, topup
+from app.bot.handlers import fallback, menu, meta_wizard, orders, start, tg_ads_wizard, topup
 from app.bot.wide import WideButtonsMiddleware
 from app.bot.handlers.admin import panel as admin_panel
 from app.bot.handlers.admin import orders as admin_orders
@@ -54,6 +54,7 @@ def build_dispatcher() -> Dispatcher:
     dp.include_router(admin_panel.router)
     dp.include_router(start.router)
     dp.include_router(meta_wizard.router)   # قبل menu: يلتقط meta:* و ord:resume
+    dp.include_router(tg_ads_wizard.router) # tga:*
     dp.include_router(orders.router)
     dp.include_router(menu.router)
     dp.include_router(topup.router)

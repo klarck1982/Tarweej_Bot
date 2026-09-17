@@ -25,6 +25,10 @@ class AdminOrder(StatesGroup):
     refund_reason = State()
     message_user = State()
     fallback_username = State()
+    tga_revision = State()
+    tga_reject = State()
+    tga_results = State()
+    tga_text = State()
 
 
 async def _list_view() -> tuple[str, object]:
@@ -56,7 +60,7 @@ async def _send_card(cb: CallbackQuery, oid: int, edit: bool = False) -> None:
         return
     media_count = len(await repo.media(oid))
     text = await ON.admin_card_text(o, media_count)
-    kb = K.admin_order_card(o, nour.is_dry_run(), media_count)
+    kb = ON.admin_card_kb(o, media_count, False)
     if edit:
         try:
             await cb.message.edit_text(text, reply_markup=kb)
@@ -215,3 +219,111 @@ async def msg_fallback(message: Message, state: FSMContext) -> None:
     await settings_repo.set_("admin_fallback_username", u)
     await events.log_event("fallback_username_set", message.from_user.id, username=u)
     await message.answer(T.ADMIN_FALLBACK_SAVED.format(username=u), reply_markup=K.admin_settings_menu())
+
+
+# ───────────── 📣 Telegram Ads: انتقالات يدوية ─────────────
+
+@router.callback_query(F.data.regexp(r"^adm:tga:(\d+):to:(\w+)$"))
+async def cb_tga_to(cb: CallbackQuery, state: FSMContext) -> None:
+    parts = cb.data.split(":")
+    oid, to = int(parts[2]), parts[4]
+    o = await repo.get(oid)
+    if not o or o.get("kind") != "tg_ads":
+        await cb.answer()
+        return
+    if to not in orders_svc.MANUAL_TRANSITIONS.get(o["status"], ()):
+        await cb.answer("هذا الانتقال غير متاح من الحالة الحالية", show_alert=True)
+        await ON.refresh_admin_cards(cb.bot, oid)
+        return
+    if to == "needs_revision":
+        await C.ask_input(cb, state, AdminOrder.tga_revision, {"oid": oid}, T.ADMIN_TGA_ASK_REVISION, K.cancel_input("adm:cancel_input"))
+        return
+    if to == "rejected":
+        await C.ask_input(cb, state, AdminOrder.tga_reject, {"oid": oid}, T.ADMIN_TGA_ASK_REJECT.format(id=oid), K.cancel_input("adm:cancel_input"))
+        return
+    if to == "completed":
+        await C.ask_input(cb, state, AdminOrder.tga_results, {"oid": oid}, T.ADMIN_TGA_ASK_RESULTS.format(id=oid), K.cancel_input("adm:cancel_input"))
+        return
+    o2, changed = await orders_svc.manual_transition(oid, to, cb.from_user.id)
+    await cb.answer(f"✅ {orders_svc.STATUS_NAME.get(to, to)}" + (" — أُبلغ العميل" if changed else ""))
+    if changed and o2:
+        await ON.push_user_status(cb.bot, o2)
+    await ON.refresh_admin_cards(cb.bot, oid)
+
+
+async def _tga_finish(message: Message, state: FSMContext, to: str, note: str | None = None, results: dict | None = None) -> None:
+    data = await state.get_data()
+    await state.clear()
+    oid = data["oid"]
+    o, changed = await orders_svc.manual_transition(oid, to, message.from_user.id, note=note, results=results)
+    if not changed:
+        await message.answer("لم يُنفَّذ — الطلب تغيّرت حالته.")
+        return
+    await message.answer(f"✅ #ORD-{oid} → {orders_svc.STATUS_NAME.get(to, to)} — أُبلغ العميل.")
+    await ON.push_user_status(message.bot, o, reason=note)
+    await ON.refresh_admin_cards(message.bot, oid)
+
+
+@router.message(AdminOrder.tga_revision, F.text)
+async def msg_tga_revision(message: Message, state: FSMContext) -> None:
+    if message.text.startswith("/") or message.text in T.MAIN_BUTTONS:
+        await state.clear()
+        return
+    await _tga_finish(message, state, "needs_revision", note=message.text.strip())
+
+
+@router.message(AdminOrder.tga_reject, F.text)
+async def msg_tga_reject(message: Message, state: FSMContext) -> None:
+    if message.text.startswith("/") or message.text in T.MAIN_BUTTONS:
+        await state.clear()
+        return
+    await _tga_finish(message, state, "rejected", note=message.text.strip())
+
+
+@router.message(AdminOrder.tga_results, F.text)
+async def msg_tga_results(message: Message, state: FSMContext) -> None:
+    if message.text.startswith("/") or message.text in T.MAIN_BUTTONS:
+        await state.clear()
+        return
+    nums = [V.parse_int(x) for x in message.text.replace(",", " ").replace("،", " ").split()]
+    nums = [n for n in nums if n is not None]
+    if len(nums) < 2 or any(n < 0 for n in nums[:2]):
+        await message.answer(T.ADMIN_TGA_RESULTS_INVALID)
+        return
+    await _tga_finish(message, state, "completed", results={"views": nums[0], "clicks": nums[1]})
+
+
+@router.callback_query(F.data.regexp(r"^adm:tga:(\d+):text$"))
+async def cb_tga_text(cb: CallbackQuery, state: FSMContext) -> None:
+    oid = int(cb.data.split(":")[2])
+    o = await repo.get(oid)
+    if not o or o.get("kind") != "tg_ads" or o["status"] in repo.FINAL_STATUSES:
+        await cb.answer()
+        return
+    await C.ask_input(cb, state, AdminOrder.tga_text, {"oid": oid}, T.ADMIN_TGA_ASK_TEXT.format(id=oid), K.cancel_input("adm:cancel_input"))
+
+
+@router.message(AdminOrder.tga_text, F.text)
+async def msg_tga_text(message: Message, state: FSMContext) -> None:
+    if message.text.startswith("/") or message.text in T.MAIN_BUTTONS:
+        await state.clear()
+        return
+    txt = " ".join(message.text.split())
+    if not 10 <= len(txt) <= 160:
+        await message.answer(T.TGA_TEXT_TOO_LONG.format(n=len(txt)) if len(txt) > 160 else T.TGA_TEXT_TOO_SHORT)
+        return
+    data = await state.get_data()
+    await state.clear()
+    o = await repo.get(data["oid"])
+    if not o:
+        return
+    spec = {**o["spec"], "text": txt, "text_by_team": True}
+    o = await repo.update(o["id"], spec=spec)
+    await events.log_event("tga_text_by_team", message.from_user.id, o["id"])
+    await message.answer(f"✅ حُفظ النص لطلب #ORD-{o['id']} ({len(txt)} حرفاً) — أُبلغ العميل.")
+    try:
+        await message.bot.send_message(o["user_id"], T.TGA_TEXT_BY_TEAM.format(id=o["id"], text=T.esc(txt)),
+                                       reply_markup=K.order_view({**o, "media_count": 0}))
+    except Exception:  # noqa: BLE001
+        pass
+    await ON.refresh_admin_cards(message.bot, o["id"])
