@@ -19,6 +19,7 @@ from app.config import settings
 from app.db import pool as db
 from app.db.repo import events, settings as settings_repo
 from app.services import channels as CH
+from app.services import cpanel as CP
 
 log = logging.getLogger("admin")
 router = Router(name="admin")
@@ -62,14 +63,23 @@ async def _panel_text() -> tuple[str, dict]:
 @router.message(F.text == T.BTN_ADMIN)
 async def cmd_admin(message: Message) -> None:
     text, c = await _panel_text()
-    await message.answer(text, reply_markup=K.admin_panel(c["topups"], c["tasks"], c["tickets"], c["orders_open"], c["attention"]))
+    await message.answer(text, reply_markup=K.admin_panel(c["topups"], c["tasks"], c["tickets"], c["orders_open"], c["attention"], CP.cpanel_url()))
+
+
+@router.message(Command("cpanel"))
+async def cmd_cpanel(message: Message) -> None:
+    url = CP.cpanel_url()
+    if not url:
+        await message.answer(T.CPANEL_LOCAL_ONLY)
+        return
+    await message.answer(T.CPANEL_OPEN, reply_markup=K.cpanel_open(url))
 
 
 @router.callback_query(F.data == "adm:panel")
 async def cb_panel(cb: CallbackQuery, state: FSMContext) -> None:
     await state.clear()
     text, c = await _panel_text()
-    kb = K.admin_panel(c["topups"], c["tasks"], c["tickets"], c["orders_open"], c["attention"])
+    kb = K.admin_panel(c["topups"], c["tasks"], c["tickets"], c["orders_open"], c["attention"], CP.cpanel_url())
     try:
         await cb.message.edit_text(text, reply_markup=kb)
     except TelegramBadRequest as e:

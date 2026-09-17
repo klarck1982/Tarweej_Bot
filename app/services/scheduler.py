@@ -93,6 +93,9 @@ async def _sync_open_orders(bot: Bot) -> None:
 
 async def tick(bot: Bot) -> None:
     """دورة واحدة — تُستدعى من الحلقة، ويمكن استدعاؤها يدوياً في الاختبارات."""
+    from app.services import cpanel, pricing
+    await pricing.refresh()          # لو تغيّرت الأسعار من Cpanel على نسخة أخرى من العملية
+    await cpanel.refresh_runtime()
     await _retry_submissions(bot)
     await _expire_drafts(bot)
     await _sync_open_orders(bot)

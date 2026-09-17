@@ -19,6 +19,7 @@ from app.bot import keyboards as K
 from app.bot import texts as T
 from app.db.repo import events, orders as orders_repo, settings as settings_repo, users as users_repo
 from app.services import orders as orders_svc, pricing as P, targeting as TG, validators as V
+from app.services import cpanel as CP
 from app.services.money import InsufficientBalance
 from app.services.pricing import fmt, money
 
@@ -85,11 +86,14 @@ async def cb_start(cb: CallbackQuery, state: FSMContext) -> None:
     if not svc.get("tg_ads", True):
         await cb.answer(T.LOCKED_SERVICE, show_alert=True)
         return
+    if CP.maintenance_text():
+        await cb.answer(CP.maintenance_text(), show_alert=True)
+        return
     await state.clear()
     await state.set_state(TgAds.budget)
     await state.update_data(kind="tg_ads")
     await events.log_event("tga_start", cb.from_user.id)
-    await _edit(cb, T.TGA_INTRO_NOTE.format(hours=await _hours()), K.tga_budget())
+    await _edit(cb, T.tga_intro_note(await _hours()), K.tga_budget())
     await cb.answer()
 
 
@@ -98,9 +102,9 @@ async def _set_budget(target, state: FSMContext, raw: str, edit: bool) -> None:
     ok = val is not None and P.TG_ADS_MIN_BUDGET <= Decimal(val) <= P.TG_ADS_MAX_BUDGET
     if not ok:
         if edit:
-            await target.answer(T.TGA_BUDGET_INVALID.replace("<code>", "").replace("</code>", ""), show_alert=True)
+            await target.answer(T.tga_budget_invalid().replace("<code>", "").replace("</code>", ""), show_alert=True)
         else:
-            await target.answer(T.TGA_BUDGET_INVALID)
+            await target.answer(T.tga_budget_invalid())
         return
     await state.update_data(budget=str(money(Decimal(val))))
     d = await state.get_data()
@@ -108,6 +112,13 @@ async def _set_budget(target, state: FSMContext, raw: str, edit: bool) -> None:
         await _show_summary(target, state)
         return
     await _show_mode(target, state, new_message=not edit)
+
+
+@router.callback_query(TgAds.budget, F.data == "tga:budget:type")
+async def cb_budget_type(cb: CallbackQuery) -> None:
+    await cb.message.answer(T.TGA_BUDGET_TYPE.format(min=fmt(P.TG_ADS_MIN_BUDGET), max=fmt(P.TG_ADS_MAX_BUDGET)),
+                            reply_markup=K.cancel_input("tga:cancel"))
+    await cb.answer()
 
 
 @router.callback_query(TgAds.budget, F.data.startswith("tga:budget:"))
@@ -368,7 +379,7 @@ async def cb_back(cb: CallbackQuery, state: FSMContext) -> None:
         return
     if where == "budget":
         await state.set_state(TgAds.budget)
-        await _edit(cb, T.TGA_INTRO_NOTE.format(hours=await _hours()), K.tga_budget())
+        await _edit(cb, T.tga_intro_note(await _hours()), K.tga_budget())
     elif where == "mode":
         await _show_mode(cb, state)
     elif where == "country":
@@ -400,6 +411,9 @@ async def cb_confirm(cb: CallbackQuery, state: FSMContext) -> None:
     d = await state.get_data()
     if not d.get("budget") or not d.get("link") or not (d.get("text") or "copy" in (d.get("addons") or [])):
         await cb.answer("الطلب ناقص — راجع الملخص", show_alert=True)
+        return
+    if CP.maintenance_text():
+        await cb.answer(CP.maintenance_text(), show_alert=True)
         return
     d["tg_username"] = cb.from_user.username
     spec = _spec_from_state(d)

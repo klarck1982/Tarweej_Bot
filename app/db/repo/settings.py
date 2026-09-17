@@ -37,6 +37,18 @@ async def set_(key: str, value: Any) -> None:
     _cache.pop(key, None)
 
 
+async def get_many(keys: list[str]) -> dict[str, Any]:
+    """قراءة عدة مفاتيح باستعلام واحد (تتجاوز الذاكرة المؤقتة وتحدّثها)."""
+    rows = await db.fetch("SELECT key, value FROM settings WHERE key = ANY($1::text[])", list(keys))
+    now = time.monotonic()
+    out: dict[str, Any] = {}
+    for r in rows:
+        raw = r["value"]
+        out[r["key"]] = json.loads(raw) if isinstance(raw, str) else raw
+        _cache[r["key"]] = (now + _TTL, out[r["key"]])
+    return out
+
+
 def invalidate(key: str | None = None) -> None:
     if key is None:
         _cache.clear()

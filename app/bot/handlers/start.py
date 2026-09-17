@@ -34,7 +34,12 @@ async def show_main_menu(message: Message, user_id: int, is_admin: bool, greet_n
             attention = await topups_repo.count_pending() + await orders_repo.count_attention(nour.is_dry_run())
         except Exception:  # noqa: BLE001
             attention = 0
-    kb = K.main_menu(is_admin, fmt(balance), attention)
+    try:
+        from app.db.repo import settings as settings_repo
+        svc = await settings_repo.services()
+    except Exception:  # noqa: BLE001
+        svc = None
+    kb = K.main_menu(is_admin, fmt(balance), attention, svc)
     if edit:
         try:
             await message.edit_text(text, reply_markup=kb)

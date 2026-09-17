@@ -10,6 +10,7 @@ from aiogram.types import CallbackQuery, InputMediaPhoto, InputMediaVideo, Messa
 from app.bot import keyboards as K
 from app.bot import texts as T
 from app.config import settings
+from app.services import cpanel as CP
 from app.db.repo import orders as repo
 from app.services import order_notify as ON, orders as orders_svc, pricing as P, targeting as TG
 from app.services.pricing import fmt
@@ -155,7 +156,7 @@ async def send_media(cb: CallbackQuery, oid: int, dest: int | None = None) -> No
 @router.callback_query(F.data.startswith("ord:help:"))
 async def cb_help(cb: CallbackQuery) -> None:
     oid = int(cb.data.split(":")[2])
-    contact = f"@{settings.support_username}" if settings.support_username else T.NO_CONTACT
+    contact = f"@{CP.rt('support_username')}" if CP.rt("support_username") else T.NO_CONTACT
     await cb.message.answer(
         f"💬 <b>مساعدة بخصوص #ORD-{oid}</b>\nالتذاكر داخل البوت تُفعَّل في الخطوة 6 — حالياً تواصل مباشرة: {contact}\n"
         f"واذكر رقم الطلب <code>ORD-{oid}</code>.",

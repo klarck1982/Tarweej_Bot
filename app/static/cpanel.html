@@ -1,0 +1,502 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<title>Cpanel — ترويج بوت</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+:root{
+  --bg:var(--tg-theme-secondary-bg-color,#efeff4);--card:var(--tg-theme-section-bg-color,var(--tg-theme-bg-color,#fff));
+  --tx:var(--tg-theme-text-color,#0a0a0a);--hint:var(--tg-theme-hint-color,#8e8e93);--line:var(--tg-theme-section-separator-color,rgba(128,128,128,.22));
+  --link:var(--tg-theme-link-color,#3390ec);--btn:var(--tg-theme-button-color,#3390ec);--btntx:var(--tg-theme-button-text-color,#fff);
+  --input:var(--tg-theme-secondary-bg-color,#f2f2f7);--b1:#6a5cff;--b2:#3390ec;--ok:#34c759;--warn:#ff9f0a;--bad:#ff3b30
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;background:var(--bg);color:var(--tx);font-family:-apple-system,"Segoe UI",Roboto,"Noto Naskh Arabic","Noto Sans Arabic",Tahoma,Arial,sans-serif;font-size:14px;line-height:1.5}
+body{padding-bottom:calc(76px + env(safe-area-inset-bottom))}
+.hidden{display:none!important}
+/* gate */
+#gate{min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:30px 24px;gap:8px}
+#gate .ic{width:74px;height:74px;border-radius:22px;background:linear-gradient(135deg,var(--b1),var(--b2));display:grid;place-items:center;font-size:34px;color:#fff;box-shadow:0 12px 30px rgba(51,144,236,.35)}
+#gate h3{margin:10px 0 0;font-size:16px}#gate p{margin:0;color:var(--hint);font-size:13px;max-width:320px}
+.spin{width:28px;height:28px;border:3px solid var(--line);border-top-color:var(--b2);border-radius:50%;animation:sp 1s linear infinite;margin:14px auto}
+@keyframes sp{to{transform:rotate(360deg)}}
+/* hero */
+.hero{background:linear-gradient(135deg,var(--b1),var(--b2));color:#fff;padding:14px 16px 14px;position:relative}
+.hero .ht{font-size:18px;font-weight:800}.hero .hi{font-size:12px;opacity:.9}.hero .hs{font-size:12px;opacity:.92;margin-top:3px}
+.hrow{display:flex;justify-content:space-between;align-items:flex-start;gap:8px}
+.ver{background:rgba(255,255,255,.2);border-radius:8px;padding:2px 8px;font-size:11px;white-space:nowrap}
+.hstat{display:flex;flex-wrap:wrap;gap:6px 12px;font-size:11.5px;margin-top:8px;opacity:.95}
+.chips{display:flex;flex-wrap:wrap;gap:5px;margin-top:8px}
+.chip{display:inline-flex;align-items:center;gap:4px;padding:4px 11px;border-radius:999px;background:var(--input);border:1px solid var(--line);font-size:12.5px;cursor:pointer;user-select:none}
+.hero .chip{background:rgba(255,255,255,.16);border-color:rgba(255,255,255,.25);color:#fff}
+.hero .chip.on{background:#fff;color:var(--b2);border-color:transparent;font-weight:800}
+.card .chip.on{background:var(--b2);color:#fff;border-color:transparent;font-weight:700}
+.chip.add{border-style:dashed;color:var(--hint)}
+.chip .x{opacity:.7;margin-right:2px}
+/* layout */
+.kpis{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:10px 12px}
+.kpi{background:var(--card);border-radius:14px;padding:10px 12px}
+.kpi .l{font-size:11.5px;color:var(--hint)}.kpi .v{font-size:21px;font-weight:800;margin:2px 0;direction:ltr;text-align:right}.kpi .d{font-size:11px;color:var(--ok)}.kpi .d.neg{color:var(--bad)}
+.card{background:var(--card);border-radius:14px;margin:10px 12px;padding:4px 12px}
+.card.pad{padding:12px}
+.ctitle{font-weight:800;padding:8px 0 4px;display:flex;justify-content:space-between;align-items:center}
+.sec{font-size:11.5px;color:var(--hint);margin:14px 18px 0;font-weight:700;letter-spacing:.2px}
+.row{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:9px 0;border-bottom:1px solid var(--line)}
+.row:last-child{border-bottom:0}.row.col{flex-direction:column;align-items:stretch}
+.row .lbl{flex:1;min-width:0}.row .h{font-size:11px;color:var(--hint);display:block}
+.n{background:var(--input);border-radius:999px;padding:1px 9px;font-weight:800;font-size:12px}.n.bad{background:var(--bad);color:#fff}.n.warn{background:var(--warn);color:#fff}
+/* inputs */
+input[type=text],input[type=number],textarea,select{font:inherit;color:var(--tx);background:var(--input);border:1px solid var(--line);border-radius:9px;padding:6px 10px;outline:none}
+input:focus,textarea:focus{border-color:var(--b2)}
+.num{width:84px;text-align:center;font-weight:800;direction:ltr}
+.num.sm{width:64px}
+.wide{width:100%}
+.mono{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px;direction:ltr;text-align:left}
+textarea{min-height:60px;resize:vertical}
+.step{display:flex;align-items:center;gap:6px;direction:ltr}
+.step button{width:30px;height:30px;border-radius:8px;border:1px solid var(--line);background:var(--input);color:var(--b2);font-size:18px;line-height:1;cursor:pointer}
+.sw{width:44px;height:26px;border-radius:13px;background:#c7c7cc;position:relative;flex:none;cursor:pointer;transition:background .15s;border:0;padding:0}
+.sw::after{content:"";position:absolute;top:2px;left:2px;width:22px;height:22px;border-radius:50%;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.35);transition:left .15s}
+.sw.on{background:var(--ok)}.sw.on::after{left:20px}.sw.lock{opacity:.55;cursor:not-allowed}
+.prev{background:rgba(51,144,236,.09);border:1px dashed var(--b2);border-radius:10px;padding:8px 10px;font-size:12.5px;margin:8px 0 10px;line-height:1.75}
+.prev .was{color:var(--warn)}
+/* chart */
+.bars{display:flex;align-items:flex-end;gap:7px;height:72px;padding:14px 2px 0;direction:ltr}
+.bar{flex:1;background:linear-gradient(180deg,var(--b1),var(--b2));border-radius:5px 5px 0 0;position:relative;min-height:2px}
+.bar.t{background:linear-gradient(180deg,#ff9f0a,#ff6a00)}
+.bar i{position:absolute;top:-15px;left:50%;transform:translateX(-50%);font-size:9.5px;font-style:normal;color:var(--hint);white-space:nowrap}
+.days{display:flex;justify-content:space-between;font-size:10.5px;color:var(--hint);padding:4px 2px 6px;direction:ltr}.days span{flex:1;text-align:center}
+/* tabs */
+.tabs{position:fixed;bottom:0;left:0;right:0;display:flex;justify-content:space-around;padding:8px 6px calc(10px + env(safe-area-inset-bottom));background:var(--card);border-top:1px solid var(--line);z-index:5}
+.tab{display:flex;flex-direction:column;align-items:center;gap:1px;font-size:10.5px;color:var(--hint);cursor:pointer;background:none;border:0;font-family:inherit}
+.tab i{font-style:normal;font-size:19px}.tab.on{color:var(--b2);font-weight:800}
+/* save bar */
+.savebar{position:fixed;left:0;right:0;bottom:calc(58px + env(safe-area-inset-bottom));display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 12px;background:var(--card);border-top:1px solid var(--line);box-shadow:0 -6px 16px rgba(0,0,0,.08);z-index:4;transform:translateY(120%);transition:transform .2s}
+.savebar.show{transform:none}
+.savebar .u{font-size:11.5px;color:var(--warn);font-weight:700}
+.btn{display:inline-block;text-align:center;padding:9px 14px;border-radius:11px;font-weight:800;border:0;font-family:inherit;font-size:13px;cursor:pointer}
+.btn.p{background:linear-gradient(135deg,var(--b1),var(--b2));color:#fff}
+.btn.g{border:1px solid var(--line);color:var(--b2);background:var(--card)}
+.btn.sm{padding:6px 10px;font-size:12px}
+.btn.full{display:block;width:100%;margin:8px 0}
+.btn:disabled{opacity:.5;cursor:default}
+.chan{display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--line)}
+.chan:last-child{border-bottom:0}.chan .ico{width:36px;height:36px;border-radius:10px;display:grid;place-items:center;font-size:18px;background:var(--input);flex:none}
+.chan .t{flex:1;min-width:0}.chan .t b{display:block}.chan .t span{font-size:11px;color:var(--hint)}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--ok);display:inline-block;margin-left:4px}.dot.off{background:#c7c7cc}
+.log{font-size:12px;color:var(--hint);padding:7px 0;border-bottom:1px solid var(--line)}.log b{color:var(--tx)}.log:last-child{border-bottom:0}
+.pk{border:1px solid var(--line);border-radius:12px;padding:10px;margin:8px 0}
+.pk .top{display:flex;align-items:center;gap:8px}.pk .top input.title{flex:1}
+.pk .grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-top:8px;align-items:end}
+.pk label{font-size:11px;color:var(--hint);display:block}
+.pk .res{font-size:12px;margin-top:6px}
+.toast{position:fixed;top:12px;left:50%;transform:translateX(-50%) translateY(-40px);background:var(--tx);color:var(--bg);padding:9px 16px;border-radius:12px;font-size:13px;font-weight:700;opacity:0;transition:.25s;z-index:9;max-width:92vw;text-align:center}
+.toast.show{opacity:1;transform:translateX(-50%)}
+.toast.err{background:var(--bad);color:#fff}
+.radio{display:flex;gap:6px}.radio .chip.on{background:var(--b2);color:#fff;border-color:transparent}
+.small{font-size:12px;color:var(--hint)}
+.center{text-align:center}
+.empty{color:var(--hint);text-align:center;padding:14px 0;font-size:12.5px}
+.warnbox{background:rgba(255,159,10,.12);border:1px solid rgba(255,159,10,.5);border-radius:10px;padding:8px 10px;font-size:12px;margin:8px 0}
+</style>
+</head>
+<body>
+
+<div id="gate">
+  <div class="ic">🔒</div>
+  <h3 id="gate-title">جارٍ التحقق…</h3>
+  <p id="gate-msg">نتأكد من هويتك عبر تيليغرام</p>
+  <div class="spin" id="gate-spin"></div>
+  <button class="btn p hidden" id="gate-retry" onclick="boot()">إعادة المحاولة</button>
+</div>
+
+<div id="app" class="hidden">
+  <div id="toast" class="toast"></div>
+
+  <!-- ═══ الرئيسية ═══ -->
+  <section id="tab-home">
+    <div class="hero">
+      <div class="hrow"><div><div class="hi" id="hello">مرحباً 👋</div><div class="ht" id="botname">Cpanel</div></div><span class="ver" id="ver">v—</span></div>
+      <div class="hstat"><span>● متصل</span><span id="nourmode">Nour: —</span><span id="updated">آخر تحديث: الآن</span></div>
+      <div class="chips" id="periods">
+        <span class="chip" data-p="today">اليوم</span><span class="chip on" data-p="7d">7 أيام</span><span class="chip" data-p="30d">30 يوم</span><span class="chip" data-p="all">الكل</span>
+      </div>
+    </div>
+    <div class="kpis">
+      <div class="kpi"><div class="l">👥 المستخدمون</div><div class="v" id="k-users">—</div><div class="d" id="k-users-d"></div></div>
+      <div class="kpi"><div class="l">📦 الطلبات</div><div class="v" id="k-orders">—</div><div class="d" id="k-orders-d"></div></div>
+      <div class="kpi"><div class="l">💵 الإيراد</div><div class="v" id="k-rev">—</div><div class="d" id="k-rev-d"></div></div>
+      <div class="kpi"><div class="l">📈 صافي الربح</div><div class="v" id="k-profit">—</div><div class="d" id="k-profit-d"></div></div>
+    </div>
+    <div class="card pad">
+      <div class="ctitle" style="padding-top:0">الإيراد آخر 7 أيام</div>
+      <div class="bars" id="chart"></div><div class="days" id="chart-days"></div>
+    </div>
+    <div class="card">
+      <div class="ctitle">🔔 بانتظارك</div>
+      <div class="row"><span>📥 شحن معلّق</span><span class="n" id="w-topups">0</span></div>
+      <div class="row"><span>🟡 طلبات جديدة</span><span class="n" id="w-new">0</span></div>
+      <div class="row"><span>✏️ بانتظار نص العميل</span><span class="n" id="w-text">0</span></div>
+      <div class="small" style="padding:6px 0 10px">تُعالج من بطاقاتها في البوت أو قناة الطلبات — إدارتها من هنا في النسخة القادمة.</div>
+    </div>
+    <div class="card">
+      <div class="ctitle">الطلبات حسب الحالة</div>
+      <div class="chips" style="margin:0 0 10px" id="statuses"></div>
+    </div>
+    <div class="card">
+      <div class="row"><span>💼 رصيد Nour Ads</span><b id="nour-bal">—</b></div>
+      <div class="row"><span>👛 أرصدة العملاء (التزامات)</span><b id="liab">—</b></div>
+      <div class="row"><span>💰 شحن معتمد بالفترة</span><b id="topups-sum">—</b></div>
+    </div>
+    <div class="card">
+      <div class="ctitle">أكثر الخدمات طلباً</div>
+      <div id="top-services"></div>
+    </div>
+  </section>
+
+  <!-- ═══ الأسعار ═══ -->
+  <section id="tab-pricing" class="hidden">
+    <div class="hero"><div class="ht">💲 الأسعار</div><div class="hs">تنطبق على الطلبات الجديدة فقط — الطلبات المدفوعة تحتفظ بسعرها</div></div>
+    <div class="sec">📢 META — فيسبوك / إنستغرام</div>
+    <div class="card">
+      <div class="row"><div class="lbl">مضاعف سعر العميل<span class="h">السعر = الميزانية × هذا الرقم</span></div>
+        <div class="step"><button onclick="stepv('meta.mult',-0.05)">−</button><input class="num" type="text" inputmode="decimal" data-k="meta.mult"><button onclick="stepv('meta.mult',0.05)">+</button></div></div>
+      <div class="row"><div class="lbl">عمولة Nour Ads %<span class="h" id="nour-cost-h">تكلفتك = الميزانية × 1.10</span></div><input class="num sm" type="text" inputmode="decimal" data-k="meta.nour_fee_pct"></div>
+      <div class="row"><div class="lbl">أدنى ميزانية يومية $</div><input class="num sm" type="text" inputmode="decimal" data-k="meta.min_daily"></div>
+      <div class="row"><div class="lbl">أقصى ميزانية يومية $</div><input class="num sm" type="text" inputmode="decimal" data-k="meta.max_daily"></div>
+      <div class="row"><div class="lbl">أقصى مدة (يوم)<span class="h">حد Nour Ads: 30</span></div><input class="num sm" type="number" min="1" max="30" data-k="meta.max_days"></div>
+      <div class="row"><div class="lbl">حد خيار «كلاهما» $/يوم<span class="h">فيسبوك + إنستغرام معاً</span></div><input class="num sm" type="text" inputmode="decimal" data-k="meta.both_min_daily"></div>
+      <div class="prev" id="meta-prev"></div>
+    </div>
+
+    <div class="sec">📦 باقات META</div>
+    <div class="card pad" id="packages"></div>
+    <div class="card">
+      <div class="row"><div class="lbl"><b id="bundle-title-lbl">📦 انطلاقة متجر</b><span class="h" id="bundle-h"></span></div><button class="sw" data-k="bundle.enabled"></button></div>
+      <div class="row"><div class="lbl">الاسم</div><input type="text" style="width:150px" data-k="bundle.title"></div>
+      <div class="row"><div class="lbl">السعر $</div><input class="num sm" type="text" inputmode="decimal" data-k="bundle.price"></div>
+      <div class="row"><div class="lbl">الباقة الأساسية</div><select data-k="bundle.package" id="bundle-package"></select></div>
+      <div class="row col"><div class="lbl">وصف مختصر</div><input type="text" class="wide" data-k="bundle.includes" style="margin-top:6px"></div>
+    </div>
+
+    <div class="sec">📣 TELEGRAM ADS</div>
+    <div class="card">
+      <div class="row"><div class="lbl">مضاعف سعر العميل<span class="h">التكلفة = الميزانية نفسها (TON من حسابك)</span></div>
+        <div class="step"><button onclick="stepv('tg_ads.mult',-0.05)">−</button><input class="num" type="text" inputmode="decimal" data-k="tg_ads.mult"><button onclick="stepv('tg_ads.mult',0.05)">+</button></div></div>
+      <div class="row"><div class="lbl">أدنى ميزانية $</div><input class="num sm" type="text" inputmode="decimal" data-k="tg_ads.min"></div>
+      <div class="row"><div class="lbl">أقصى ميزانية $</div><input class="num sm" type="text" inputmode="decimal" data-k="tg_ads.max"></div>
+      <div class="row col"><div class="lbl">الأرقام الجاهزة (أزرار الميزانية)<span class="h">اضغط رقماً لحذفه · حتى 8</span></div><div class="chips" id="tg-presets"></div></div>
+      <div class="prev" id="tg-prev"></div>
+    </div>
+
+    <div class="sec">📝 القنوات الشريكة (للتسليم القادم)</div>
+    <div class="card">
+      <div class="row"><div class="lbl">مضاعف سعر القناة</div><input class="num sm" type="text" inputmode="decimal" data-k="tg_post.mult"></div>
+      <div class="row"><div class="lbl">زيادة التثبيت (0.50 = +50%)</div><input class="num sm" type="text" inputmode="decimal" data-k="tg_post.pin_extra"></div>
+    </div>
+
+    <div class="sec">🎨 الإضافات (كتابة وتصميم)</div>
+    <div class="card" id="addons"></div>
+    <div class="card">
+      <div class="row"><div class="lbl">🎤 تعليق صوتي عربي (AI) $<span class="h">يُضاف على الريل/المونتاج</span></div><input class="num sm" type="text" inputmode="decimal" data-k="voiceover"></div>
+    </div>
+    <div class="sec">📦 باقات الإضافات الموفّرة</div>
+    <div class="card" id="addon-bundles"></div>
+
+    <div class="sec">💰 الشحن</div>
+    <div class="card">
+      <div class="row"><div class="lbl">أدنى شحنة $</div><input class="num sm" type="text" inputmode="decimal" data-g="min_topup_usd"></div>
+      <div class="row"><div class="lbl">أقصى شحنة $</div><input class="num sm" type="text" inputmode="decimal" data-g="max_topup_usd"></div>
+      <div class="row col"><div class="lbl">الأرقام الجاهزة للشحن</div><div class="chips" id="topup-presets"></div></div>
+      <div class="row"><div class="lbl">سعر صرف الليرة (ل.س لكل 1$)<span class="h">لطريقة شام كاش ليرة · يُعدَّل من البوت: ⚙️ إعدادات سريعة ← 💱</span></div><b id="syp-rate">—</b></div>
+    </div>
+    <div style="height:70px"></div>
+  </section>
+
+  <!-- ═══ الدفع ═══ -->
+  <section id="tab-pay" class="hidden">
+    <div class="hero"><div class="ht">💳 طرق الدفع</div><div class="hs">ما يراه العميل في «➕ شحن رصيد» — الطريقة بلا عنوان تبقى مخفية</div></div>
+    <div id="payments"></div>
+    <div class="prev" style="margin:4px 12px 10px">ℹ️ الطريقة المُطفأة تختفي من شاشة الشحن فوراً بعد الحفظ. الشحنات المعلّقة لا تتأثر.</div>
+    <div style="height:70px"></div>
+  </section>
+
+  <!-- ═══ الخدمات ═══ -->
+  <section id="tab-services" class="hidden">
+    <div class="hero"><div class="ht">🧩 الخدمات</div><div class="hs">أزرار القائمة الرئيسية — تشغيل/إيقاف بلحظة</div></div>
+    <div class="card" id="services"></div>
+    <div class="sec">عند إيقاف خدمة</div>
+    <div class="card">
+      <div class="row"><span>🔒 يبقى الزر ظاهراً بشارة «قريباً»</span><span class="radio"><span class="chip" data-g="disabled_style" data-v="lock">هذا</span></span></div>
+      <div class="row"><span>👻 يختفي الزر من القائمة تماماً</span><span class="radio"><span class="chip" data-g="disabled_style" data-v="hide">هذا</span></span></div>
+    </div>
+    <div class="sec">🛠️ وضع الصيانة</div>
+    <div class="card">
+      <div class="row"><div class="lbl">إيقاف الطلبات الجديدة مؤقتاً<span class="h">الرصيد والطلبات القديمة تبقى متاحة للعرض</span></div><button class="sw" data-g="maintenance"></button></div>
+      <div class="row col"><div class="lbl">الرسالة التي تظهر للعميل</div><textarea class="wide" data-g="maintenance_msg" style="margin-top:6px"></textarea></div>
+    </div>
+    <div style="height:70px"></div>
+  </section>
+
+  <!-- ═══ المزيد ═══ -->
+  <section id="tab-more" class="hidden">
+    <div class="hero"><div class="ht">⚙️ المزيد</div><div class="hs">القنوات · الإعدادات العامة · سجل التغييرات</div></div>
+    <div class="sec">📡 قنوات الإدارة</div>
+    <div class="card" id="channels"></div>
+    <div class="prev" style="margin:4px 12px">➕ لربط قناة: أضف البوت مشرفاً فيها، ثم اختر دورها من الرسالة التي تصلك في الخاص — لا حاجة لنسخ أرقام.</div>
+    <div class="sec">📣 قناة العروض (تظهر للعملاء)</div>
+    <div class="card">
+      <div class="row col"><input type="text" class="wide mono" placeholder="https://t.me/your_channel" data-g="updates_channel"><span class="small" style="margin-top:6px" id="updates-env"></span></div>
+    </div>
+    <div class="sec">⚙️ عام</div>
+    <div class="card">
+      <div class="row"><div class="lbl">معرّف الدعم<span class="h" id="support-env"></span></div><input type="text" class="mono" style="width:160px" placeholder="username" data-g="support_username"></div>
+      <div class="row"><div class="lbl">مدة مراجعة تيليغرام المعروضة</div><input type="text" style="width:110px;text-align:center" data-g="tg_ads_review_hours"></div>
+      <div class="row"><div class="lbl">تنبيه رصيد Nour أقل من $</div><input class="num sm" type="text" inputmode="decimal" data-g="low_balance_threshold_usd"></div>
+      <div class="row"><div class="lbl">صلاحية المسودة غير المدفوعة (يوم)</div><input class="num sm" type="number" min="1" max="60" data-g="order_draft_days"></div>
+      <div class="row col"><div class="lbl">نص وقت الاعتماد المتوقع للشحن (اختياري)</div><input type="text" class="wide" placeholder="مثال: يُعتمد خلال 10 – 30 دقيقة في أوقات العمل" data-g="topup_sla_text" style="margin-top:6px"></div>
+    </div>
+    <div class="sec">👮 المشرفون <span style="font-weight:400">(للعرض — تُدار من ADMIN_IDS في Render)</span></div>
+    <div class="card"><div class="row"><div class="chips" style="margin:0" id="admins"></div></div></div>
+    <div class="sec">🧾 آخر التغييرات</div>
+    <div class="card" id="audit"></div>
+    <div class="center small" style="padding:14px 0 6px">ترويج بوت · Cpanel <span id="ver2"></span> · Crafted with Arena.ai ✨</div>
+    <div style="height:70px"></div>
+  </section>
+
+  <div class="savebar" id="savebar">
+    <span class="u" id="save-msg">● تغيير غير محفوظ</span>
+    <span style="display:flex;gap:6px">
+      <button class="btn g sm" id="btn-reset" onclick="resetSection()">↺ تراجع</button>
+      <button class="btn g sm hidden" id="btn-defaults" onclick="loadDefaults()">↺ الافتراضي</button>
+      <button class="btn p sm" id="btn-save" onclick="saveSection()">💾 حفظ</button>
+    </span>
+  </div>
+
+  <nav class="tabs">
+    <button class="tab on" data-tab="home"><i>📊</i>الرئيسية</button>
+    <button class="tab" data-tab="pricing"><i>💲</i>الأسعار</button>
+    <button class="tab" data-tab="pay"><i>💳</i>الدفع</button>
+    <button class="tab" data-tab="services"><i>🧩</i>الخدمات</button>
+    <button class="tab" data-tab="more"><i>⚙️</i>المزيد</button>
+  </nav>
+</div>
+
+<script>
+const tg = window.Telegram && window.Telegram.WebApp;
+const initData = (tg && tg.initData) || "";
+let S = null;            // snapshot from server
+let W = {};              // working copies: pricing, general, payments, services
+let dirty = {pricing:false, general:false, payments:false, services:false};
+let tab = "home", period = "7d";
+const $ = (q, el=document) => el.querySelector(q);
+const $$ = (q, el=document) => Array.from(el.querySelectorAll(q));
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const money = x => { const v = Math.round(Number(x)*100)/100; return (Number.isInteger(v) ? v.toFixed(0) : v.toFixed(2)) + "$"; };
+const clone = o => JSON.parse(JSON.stringify(o));
+const deepGet = (o, path) => path.split(".").reduce((a,k)=>a==null?a:a[k], o);
+const deepSet = (o, path, v) => { const ks = path.split("."); let c=o; ks.slice(0,-1).forEach(k=>{ if(c[k]==null) c[k]={}; c=c[k]; }); c[ks[ks.length-1]] = v; };
+
+if (tg) { tg.ready(); tg.expand(); try { tg.setHeaderColor("#6a5cff"); } catch(e){} }
+
+async function api(path, body) {
+  const r = await fetch("/cpanel/api/" + path, {method:"POST", headers:{"Content-Type":"application/json","X-Telegram-Init-Data":initData}, body: JSON.stringify(body||{})});
+  let data = {}; try { data = await r.json(); } catch(e) {}
+  if (!r.ok) { const err = new Error(data.message || ("خطأ " + r.status)); err.code = data.error || r.status; throw err; }
+  return data;
+}
+function toast(msg, err) { const t = $("#toast"); t.textContent = msg; t.className = "toast show" + (err ? " err" : ""); clearTimeout(t._h); t._h = setTimeout(()=> t.className="toast", 2600); if (tg && tg.HapticFeedback) { try { tg.HapticFeedback.notificationOccurred(err ? "error" : "success"); } catch(e){} } }
+
+async function boot() {
+  $("#gate-spin").classList.remove("hidden"); $("#gate-retry").classList.add("hidden");
+  if (!initData) { gate("Cpanel تُفتح من داخل تيليغرام فقط", "افتح البوت ← 🛠️ لوحة الإدارة ← 🖥️ فتح Cpanel", false); return; }
+  try { S = await api("snapshot"); }
+  catch (e) { gate(e.code === "forbidden" ? "هذه اللوحة للإدارة فقط" : "تعذّر الدخول", e.message, true); return; }
+  $("#gate").classList.add("hidden"); $("#app").classList.remove("hidden");
+  W = {pricing: clone(S.pricing), general: clone(S.general), payments: clone(S.payments), services: clone(S.services)};
+  renderAll();
+}
+function gate(title, msg, retry) { $("#gate-title").textContent = title; $("#gate-msg").textContent = msg; $("#gate-spin").classList.add("hidden"); $("#gate-retry").classList.toggle("hidden", !retry); }
+
+/* ───────── render ───────── */
+function renderAll() {
+  $("#hello").textContent = "مرحباً " + (S.me.name || "") + " 👋";
+  $("#botname").textContent = S.bot_name + " · Cpanel";
+  $("#ver").textContent = "v" + S.version; $("#ver2").textContent = "v" + S.version;
+  renderStats(S.stats); renderPricing(); renderPayments(); renderServices(); renderMore();
+  updateSavebar();
+}
+function renderStats(st) {
+  $("#nourmode").textContent = "Nour: " + (st.nour_dry ? "🧪 محاكاة" : "🟢 حقيقي");
+  $("#updated").textContent = "آخر تحديث: " + new Date().toLocaleTimeString("ar-SY",{hour:"2-digit",minute:"2-digit"});
+  $("#k-users").textContent = st.users_total; $("#k-users-d").textContent = "+" + st.users_new + " بالفترة";
+  $("#k-orders").textContent = st.orders; $("#k-orders-d").textContent = st.orders_open + " مفتوحة الآن";
+  $("#k-rev").textContent = money(st.revenue);
+  const g = st.growth_pct; const gd = $("#k-rev-d"); gd.textContent = g == null ? "لا فترة سابقة للمقارنة" : ((g>=0?"+":"") + g + "% عن الفترة السابقة"); gd.className = "d" + (g != null && g < 0 ? " neg" : "");
+  $("#k-profit").textContent = money(st.profit); $("#k-profit-d").textContent = "هامش " + st.margin_pct + "%";
+  const mx = Math.max(1, ...st.chart.map(c=>c.v)); const ch = $("#chart"); ch.innerHTML = ""; const dy = $("#chart-days"); dy.innerHTML = "";
+  const names = ["ح","ن","ث","ر","خ","ج","س"];
+  st.chart.forEach((c,i) => { const top = c.v === mx && c.v > 0; ch.insertAdjacentHTML("beforeend", `<div class="bar${top?" t":""}" style="height:${Math.max(3, c.v/mx*100)}%">${c.v>0?`<i>${money(c.v)}</i>`:""}</div>`); dy.insertAdjacentHTML("beforeend", `<span>${names[new Date(c.d + "T12:00:00").getDay()]}</span>`); });
+  $("#w-topups").textContent = st.pending_topups; $("#w-topups").className = "n" + (st.pending_topups ? " bad" : "");
+  $("#w-new").textContent = st.new_orders; $("#w-new").className = "n" + (st.new_orders ? " warn" : "");
+  $("#w-text").textContent = st.awaiting_text;
+  const em = {submitted:"🟡",paid:"🟡",submitting:"🟡",in_progress:"🔵",active:"🟢",completed:"✅",paused:"⏸️",rejected:"❌",refunded:"↩️",needs_revision:"✏️",failed_submit:"⚠️",awaiting_payment:"📝",draft:"📝",cancelled:"🚫"};
+  $("#statuses").innerHTML = Object.entries(st.by_status).map(([k,v]) => `<span class="chip">${em[k]||"•"} ${v}</span>`).join("") || `<span class="empty">لا طلبات بعد</span>`;
+  $("#nour-bal").textContent = st.nour_balance == null ? "—" : money(st.nour_balance) + (st.nour_dry ? " 🧪" : "");
+  $("#liab").textContent = money(st.liabilities); $("#topups-sum").textContent = money(st.topups_period);
+  $("#top-services").innerHTML = st.top_services.length ? st.top_services.map(t => `<div class="row"><span>${esc(t.label)}</span><b>${t.n}</b></div>`).join("") : `<div class="empty">لا طلبات مدفوعة في هذه الفترة</div>`;
+}
+$("#periods").addEventListener("click", async e => { const c = e.target.closest(".chip"); if (!c) return; $$("#periods .chip").forEach(x=>x.classList.toggle("on", x===c)); period = c.dataset.p; try { renderStats(await api("stats", {period})); } catch(err) { toast(err.message, true); } });
+
+/* ───────── pricing ───────── */
+function bindInputs(section) {
+  const attr = section === "pricing" ? "data-k" : "data-g";
+  $$(`[${attr}]`).forEach(el => {
+    if (el._bound) return; el._bound = true;
+    const key = el.getAttribute(attr);
+    const target = () => section === "pricing" ? W.pricing : W.general;
+    if (el.classList.contains("sw")) {
+      el.addEventListener("click", () => { if (el.classList.contains("lock")) return; deepSet(target(), key, !deepGet(target(), key)); markDirty(section); refreshSection(section); });
+    } else if (el.classList.contains("chip")) {
+      el.addEventListener("click", () => { deepSet(target(), key, el.dataset.v); markDirty(section); refreshSection(section); });
+    } else {
+      el.addEventListener("input", () => { let v = el.value; if (el.type === "number") v = v === "" ? "" : Number(v); deepSet(target(), key, v); markDirty(section); if (section === "pricing") previews(); });
+    }
+  });
+}
+function fillInputs(section) {
+  const attr = section === "pricing" ? "data-k" : "data-g"; const src = section === "pricing" ? W.pricing : W.general;
+  $$(`[${attr}]`).forEach(el => { const key = el.getAttribute(attr); const v = deepGet(src, key);
+    if (el.classList.contains("sw")) el.classList.toggle("on", !!v);
+    else if (el.classList.contains("chip")) el.classList.toggle("on", String(v) === el.dataset.v);
+    else if (el.tagName === "SELECT") { /* filled separately */ el.value = v; }
+    else if (document.activeElement !== el) el.value = v ?? ""; });
+}
+function stepv(key, d) { const cur = Number(deepGet(W.pricing, key)) || 0; deepSet(W.pricing, key, (Math.round((cur + d) * 100) / 100).toFixed(2)); markDirty("pricing"); fillInputs("pricing"); previews(); }
+
+function renderPricing() {
+  const p = W.pricing;
+  // packages
+  const box = $("#packages"); box.innerHTML = "";
+  p.packages.forEach((pk, i) => {
+    box.insertAdjacentHTML("beforeend", `<div class="pk" data-i="${i}">
+      <div class="top"><input type="text" style="width:44px;text-align:center" value="${esc(pk.emoji)}" data-pk="emoji"><input type="text" class="title" value="${esc(pk.title)}" data-pk="title" placeholder="اسم الباقة"><button class="sw ${pk.enabled?"on":""}" data-pk="enabled" title="إظهار/إخفاء"></button>${["trial","growth","pro"].includes(pk.code)?"":`<button class="btn g sm" data-del="${i}">🗑️</button>`}</div>
+      <div class="grid"><div><label>$ / يوم</label><input class="num sm wide" type="text" inputmode="decimal" value="${esc(pk.daily)}" data-pk="daily"></div><div><label>أيام</label><input class="num sm wide" type="number" min="1" max="30" value="${pk.days}" data-pk="days"></div><div><label>الرمز</label><input type="text" class="mono wide" value="${esc(pk.code)}" data-pk="code" ${["trial","growth","pro"].includes(pk.code)?"disabled":""}></div></div>
+      <input type="text" class="wide" style="margin-top:6px" value="${esc(pk.blurb||"")}" data-pk="blurb" placeholder="وصف قصير يظهر للعميل">
+      <div class="res" data-res></div></div>`);
+  });
+  if (p.packages.length < 6) box.insertAdjacentHTML("beforeend", `<button class="btn g full" id="add-pk">+ باقة جديدة</button>`);
+  $$("#packages .pk").forEach(card => {
+    const i = Number(card.dataset.i);
+    $$("[data-pk]", card).forEach(el => {
+      const f = el.dataset.pk;
+      if (el.classList.contains("sw")) el.addEventListener("click", () => { p.packages[i].enabled = !p.packages[i].enabled; el.classList.toggle("on", p.packages[i].enabled); markDirty("pricing"); previews(); });
+      else el.addEventListener("input", () => { p.packages[i][f] = el.type === "number" ? Number(el.value) : el.value; markDirty("pricing"); previews(); });
+    });
+    const del = $("[data-del]", card); if (del) del.addEventListener("click", () => { p.packages.splice(i, 1); markDirty("pricing"); renderPricing(); });
+  });
+  const add = $("#add-pk"); if (add) add.addEventListener("click", () => { p.packages.push({code:"pkg"+Date.now().toString().slice(-4), title:"باقة جديدة", emoji:"🎯", daily:"4", days:7, blurb:"", enabled:true}); markDirty("pricing"); renderPricing(); });
+  // bundle package select
+  const sel = $("#bundle-package"); sel.innerHTML = p.packages.map(pk => `<option value="${esc(pk.code)}">${esc(pk.emoji)} ${esc(pk.title)}</option>`).join(""); sel.value = p.bundle.package;
+  if (!sel._b) { sel._b = true; sel.addEventListener("change", () => { p.bundle.package = sel.value; markDirty("pricing"); previews(); }); }
+  // tg presets
+  renderPresetChips("#tg-presets", p.tg_ads.presets, v => { p.tg_ads.presets = v; markDirty("pricing"); renderPricing(); }, "مبلغ بالدولار");
+  // addons
+  const ad = $("#addons"); ad.innerHTML = Object.entries(p.addons).map(([code, a]) => `<div class="row"><div class="lbl">${esc(a.emoji)} <input type="text" value="${esc(a.title)}" data-ad="${code}.title" style="width:130px"><span class="h">التسليم خلال <input type="number" class="num sm" style="width:56px;padding:2px 6px" min="1" max="240" value="${a.hours}" data-ad="${code}.hours"> ساعة</span></div><input class="num sm" type="text" inputmode="decimal" value="${esc(a.price)}" data-ad="${code}.price"></div>`).join("");
+  $$("[data-ad]", ad).forEach(el => el.addEventListener("input", () => { deepSet(p.addons, el.dataset.ad, el.type === "number" ? Number(el.value) : el.value); markDirty("pricing"); previews(); }));
+  const ab = $("#addon-bundles"); ab.innerHTML = p.addon_bundles.map((b, i) => `<div class="row"><input type="text" value="${esc(b.title)}" data-ab="${i}.title" style="flex:1"><span class="small">بدل</span><input class="num sm" type="text" inputmode="decimal" value="${esc(b.was)}" data-ab="${i}.was"><span class="small">←</span><input class="num sm" type="text" inputmode="decimal" value="${esc(b.price)}" data-ab="${i}.price"></div>`).join("");
+  $$("[data-ab]", ab).forEach(el => el.addEventListener("input", () => { deepSet(p.addon_bundles, el.dataset.ab, el.value); markDirty("pricing"); }));
+  // topup presets (general)
+  renderPresetChips("#topup-presets", W.general.topup_presets_usd, v => { W.general.topup_presets_usd = v; markDirty("general"); renderPricing(); }, "مبلغ بالدولار");
+  $("#syp-rate").textContent = Number(S.syp_rate) > 0 ? Number(S.syp_rate).toLocaleString("en") + " ل.س" : "غير مضبوط";
+  bindInputs("pricing"); bindInputs("general"); fillInputs("pricing"); fillInputs("general"); previews();
+}
+function renderPresetChips(sel, list, onChange, promptText) {
+  const el = $(sel); el.innerHTML = list.map(v => `<span class="chip on" data-v="${v}">${v}$ <span class="x">✕</span></span>`).join("") + (list.length < 8 ? `<span class="chip add">+ إضافة</span>` : "");
+  $$(".chip", el).forEach(c => c.addEventListener("click", () => {
+    if (c.classList.contains("add")) { const v = prompt(promptText); const n = parseInt(v); if (!n || n <= 0) return; if (!list.includes(n)) onChange([...list, n].sort((a,b)=>a-b)); }
+    else onChange(list.filter(x => x !== Number(c.dataset.v)));
+  }));
+}
+function previews() {
+  const p = W.pricing, d = S.pricing;
+  const mm = Number(p.meta.mult)||0, fee = Number(p.meta.nour_fee_pct)||0, nm = 1 + fee/100;
+  $("#nour-cost-h").textContent = "تكلفتك = الميزانية × " + nm.toFixed(2);
+  const b = 3*7; const was = Number(d.meta.mult) !== mm ? ` <span class="was">(كان ${money(b*Number(d.meta.mult))})</span>` : "";
+  $("#meta-prev").innerHTML = `🧮 مثال حي: 3$/يوم × 7 أيام → العميل يدفع <b>${money(b*mm)}</b>${was} · تدفع لـ Nour <b>${money(b*nm)}</b> · ربحك <b>${money(b*(mm-nm))}</b>` + (mm <= nm ? `<div class="warnbox">⚠️ المضاعف أقل من أو يساوي تكلفة Nour — ستخسر في كل طلب!</div>` : "");
+  const tm = Number(p.tg_ads.mult)||0, ex = Number(p.tg_ads.presets[0] || p.tg_ads.min || 10); const twas = Number(d.tg_ads.mult) !== tm ? ` <span class="was">(كان ${money(ex*Number(d.tg_ads.mult))})</span>` : "";
+  $("#tg-prev").innerHTML = `🧮 ${ex}$ → العميل <b>${money(ex*tm)}</b>${twas} · ربحك <b>${money(ex*(tm-1))}</b>` + (tm <= 1 ? `<div class="warnbox">⚠️ المضاعف ≤ 1 يعني بلا ربح</div>` : "");
+  $$("#packages .pk").forEach(card => { const pk = p.packages[Number(card.dataset.i)]; if (!pk) return; const bud = Number(pk.daily)*Number(pk.days); $("[data-res]", card).innerHTML = `${money(pk.daily)}/يوم × ${pk.days} أيام → العميل <b>${money(bud*mm)}</b> · ربح <b>${money(bud*(mm-nm))}</b>${pk.enabled?"":" · <span class='small'>مخفية</span>"}`; });
+  const base = p.packages.find(x => x.code === p.bundle.package); const addonsSum = (p.bundle.addons||[]).reduce((s,a)=> s + Number((p.addons[a]||{}).price||0), 0);
+  $("#bundle-h").textContent = base ? `متفرقة: ${money(Number(base.daily)*Number(base.days)*mm + addonsSum)} → بالباقة ${money(p.bundle.price)}` : "";
+  $("#bundle-title-lbl").textContent = (p.bundle.emoji||"📦") + " " + (p.bundle.title||"");
+}
+
+/* ───────── payments ───────── */
+function renderPayments() {
+  const box = $("#payments"); box.innerHTML = "";
+  (S.payment_order.concat(Object.keys(W.payments).filter(c => !S.payment_order.includes(c)))).forEach(code => {
+    const m = W.payments[code]; if (!m) return; const isSham = m.kind === "shamcash";
+    box.insertAdjacentHTML("beforeend", `<div class="card" data-pm="${code}">
+      <div class="row"><div class="lbl">${isSham?"🏦":"💵"} ${esc(m.title)}${m.currency==="SYP"?`<span class="h">يُحسب بسعر الصرف من قسم الأسعار</span>`:""}</div><button class="sw ${m.enabled?"on":""}" data-f="enabled"></button></div>
+      <div class="row"><input type="text" class="wide mono" value="${esc(m.address||"")}" placeholder="${isSham?"رقم الحساب":"عنوان المحفظة"}" data-f="address"><button class="btn g sm" data-copy>📋</button></div>
+      ${isSham?`<div class="row"><input type="text" class="wide" value="${esc(m.holder||"")}" placeholder="اسم صاحب الحساب" data-f="holder"></div>`:""}
+    </div>`);
+  });
+  $$("[data-pm]", box).forEach(card => { const code = card.dataset.pm;
+    $$("[data-f]", card).forEach(el => { const f = el.dataset.f;
+      if (el.classList.contains("sw")) el.addEventListener("click", () => { W.payments[code].enabled = !W.payments[code].enabled; el.classList.toggle("on", W.payments[code].enabled); markDirty("payments"); });
+      else el.addEventListener("input", () => { W.payments[code][f] = el.value; markDirty("payments"); }); });
+    $("[data-copy]", card).addEventListener("click", () => { navigator.clipboard && navigator.clipboard.writeText(W.payments[code].address||"").then(()=>toast("نُسخ ✅")); });
+  });
+}
+
+/* ───────── services ───────── */
+function renderServices() {
+  const box = $("#services"); box.innerHTML = Object.entries(S.service_names).map(([k, name]) => { const locked = S.service_locked[k]; const on = !!W.services[k];
+    return `<div class="row"><div class="lbl">${esc(name)}<span class="h">${esc(locked || (k==="meta" ? (S.stats.nour_dry ? "عبر Nour Ads · 🧪 وضع المحاكاة" : "عبر Nour Ads") : k==="tg_ads" ? "تنفيذ يدوي من حسابك" : "الإضافات تُباع مع الطلب"))}</span></div><button class="sw ${on?"on":""} ${locked?"lock":""}" data-svc="${k}"></button></div>`; }).join("");
+  $$("[data-svc]", box).forEach(el => el.addEventListener("click", () => { if (el.classList.contains("lock")) { toast(S.service_locked[el.dataset.svc], true); return; } W.services[el.dataset.svc] = !W.services[el.dataset.svc]; el.classList.toggle("on", W.services[el.dataset.svc]); markDirty("services"); }));
+  bindInputs("general"); fillInputs("general");
+}
+
+/* ───────── more ───────── */
+function renderMore() {
+  $("#channels").innerHTML = S.channels.map(c => `<div class="chan"><div class="ico">${c.emoji}</div><div class="t"><b>${esc(c.name)}</b><span><i class="dot ${c.bound?"":"off"}"></i>${c.bound ? esc(c.title) + " · " + c.id : "غير مربوطة — تصل في خاصّك"}</span></div>${c.bound?`<button class="btn g sm" data-test="${c.kind}">🧪 اختبار</button>`:""}</div>`).join("");
+  $$("[data-test]").forEach(b => b.addEventListener("click", async () => { b.disabled = true; try { await api("channel_test", {kind: b.dataset.test}); toast("وصلت ✅"); } catch(e) { toast(e.message, true); } b.disabled = false; }));
+  $("#updates-env").textContent = S.general_env.updates_channel ? "فارغ = يُستخدم رابط متغير البيئة: " + S.general_env.updates_channel : "فارغ = لا يظهر زر القناة";
+  $("#support-env").textContent = S.general_env.support_username ? "فارغ = @" + S.general_env.support_username + " من متغير البيئة" : "بدون @";
+  $("#admins").innerHTML = S.admins.map(a => `<span class="chip">${a === S.me.id ? "أنت · " : ""}${a}</span>`).join("") + `<span class="chip add">+ عبر Render</span>`;
+  const secName = {pricing:"الأسعار", general:"عام", payments:"الدفع", services:"الخدمات"};
+  $("#audit").innerHTML = S.audit.length ? S.audit.map(a => `<div class="log"><b>${esc(secName[a.section]||a.section)} · ${esc(a.key)}</b> ${esc(fmtVal(a.before))} → <b>${esc(fmtVal(a.after))}</b><br><span>${a.admin_id === S.me.id ? "أنت" : a.admin_id} · ${new Date(a.at).toLocaleString("ar-SY",{dateStyle:"short",timeStyle:"short"})}</span></div>`).join("") : `<div class="empty">لا تغييرات بعد — كل حفظ يُسجَّل هنا</div>`;
+  bindInputs("general"); fillInputs("general");
+}
+function fmtVal(v) { if (v === true) return "مفعّل"; if (v === false) return "مُطفأ"; if (v == null || v === "") return "—"; if (typeof v === "object") return JSON.stringify(v); return String(v).length > 40 ? String(v).slice(0,40)+"…" : String(v); }
+
+/* ───────── dirty / save ───────── */
+const tabSections = {home:[], pricing:["pricing","general"], pay:["payments"], services:["services","general"], more:["general"]};
+function markDirty(section) { dirty[section] = true; updateSavebar(); }
+function refreshSection(section) { if (section === "pricing") renderPricing(); else if (section === "general") { fillInputs("general"); } }
+function currentDirty() { return tabSections[tab].filter(s => dirty[s]); }
+function updateSavebar() { const d = currentDirty(); $("#savebar").classList.toggle("show", d.length > 0); $("#btn-defaults").classList.toggle("hidden", tab !== "pricing"); if (tg && tg.BackButton) { d.length ? tg.enableClosingConfirmation() : tg.disableClosingConfirmation(); } }
+function resetSection() { currentDirty().forEach(s => { W[s] = clone(S[s]); dirty[s] = false; }); renderAll(); toast("رجعت القيم المحفوظة"); }
+function loadDefaults() { if (!confirm("استعادة الأسعار الافتراضية (أرقام الإطلاق)؟ لن تُحفظ قبل الضغط على 💾")) return; W.pricing = clone(S.pricing_defaults); dirty.pricing = true; renderPricing(); updateSavebar(); }
+async function saveSection() {
+  const list = currentDirty(); if (!list.length) return;
+  const btn = $("#btn-save"); btn.disabled = true; $("#save-msg").textContent = "⏳ جارٍ الحفظ…";
+  try {
+    let last = null;
+    for (const s of list) { last = await api("save/" + s, W[s]); dirty[s] = false; }
+    const stats = S.stats, me = S.me; S = last.snapshot; S.stats = stats; S.me = me;
+    W = {pricing: clone(S.pricing), general: clone(S.general), payments: clone(S.payments), services: clone(S.services)};
+    renderAll(); toast("✅ حُفظ — يسري على البوت الآن");
+  } catch (e) { toast(e.message, true); $("#save-msg").textContent = "● تغيير غير محفوظ"; }
+  btn.disabled = false; $("#save-msg").textContent = "● تغيير غير محفوظ"; updateSavebar();
+}
+$$(".tab").forEach(b => b.addEventListener("click", () => { tab = b.dataset.tab; $$(".tab").forEach(x => x.classList.toggle("on", x === b)); ["home","pricing","pay","services","more"].forEach(t => $("#tab-"+t).classList.toggle("hidden", t !== tab)); window.scrollTo(0,0); updateSavebar(); }));
+boot();
+</script>
+</body>
+</html>

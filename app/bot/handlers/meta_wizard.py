@@ -25,6 +25,7 @@ from app.bot import keyboards as K
 from app.bot import texts as T
 from app.db.repo import events, orders as orders_repo, settings as settings_repo, users as users_repo
 from app.services import nour, orders as orders_svc, pricing as P, targeting as TG, validators as V
+from app.services import cpanel as CP
 from app.services.money import InsufficientBalance
 from app.services.pricing import fmt, money
 
@@ -116,8 +117,14 @@ async def cb_pkg(cb: CallbackQuery, state: FSMContext) -> None:
     if not svc["meta"]:
         await cb.answer(T.LOCKED_SERVICE, show_alert=True)
         return
+    if CP.maintenance_text():
+        await cb.answer(CP.maintenance_text(), show_alert=True)
+        return
     if code not in P.META_BY_CODE and code not in ("custom", "bundle"):
         await cb.answer()
+        return
+    if (code == "bundle" and not P.bundle_enabled()) or (code in P.META_BY_CODE and not P.META_BY_CODE[code].enabled):
+        await cb.answer("هذه الباقة غير متاحة حالياً — اختر باقة أخرى 🙂", show_alert=True)
         return
     await _start_pkg(cb, state, code)
     await cb.answer()
@@ -140,6 +147,13 @@ async def _set_daily(target, state: FSMContext, raw: str, edit: bool) -> None:
         await _edit(target, text, K.meta_custom_days())
     else:
         await target.answer(text, reply_markup=K.meta_custom_days())
+
+
+@router.callback_query(Meta.daily, F.data == "meta:daily:type")
+async def cb_daily_type(cb: CallbackQuery) -> None:
+    await cb.message.answer(T.META_DAILY_TYPE.format(min=fmt(P.META_MIN_DAILY), days=P.META_MAX_DAYS),
+                            reply_markup=K.cancel_input("meta:cancel"))
+    await cb.answer()
 
 
 @router.callback_query(Meta.daily, F.data.startswith("meta:daily:"))
@@ -606,6 +620,9 @@ async def cb_confirm(cb: CallbackQuery, state: FSMContext) -> None:
     d = await state.get_data()
     if not d.get("whatsapp") or not d.get("platform"):
         await cb.answer("الطلب ناقص — راجع الملخص", show_alert=True)
+        return
+    if CP.maintenance_text():
+        await cb.answer(CP.maintenance_text(), show_alert=True)
         return
     spec = _spec_from_state(d)
     # منع الضغط المزدوج: نعطّل الأزرار فوراً

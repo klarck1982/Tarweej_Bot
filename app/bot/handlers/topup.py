@@ -27,7 +27,13 @@ from app.services.pricing import fmt, money
 router = Router(name="topup")
 TZ = ZoneInfo(app_settings.tz)
 
-TOPUP_MAX = Decimal("1000")
+TOPUP_MAX_DEFAULT = Decimal("1000")
+
+
+async def _limits() -> tuple[Decimal, Decimal]:
+    lo = Decimal(str(await settings_repo.get("min_topup_usd", 5)))
+    hi = Decimal(str(await settings_repo.get("max_topup_usd", TOPUP_MAX_DEFAULT)))
+    return lo, max(hi, lo)
 LEDGER_KINDS = {"topup": "شحن", "order_charge": "طلب", "refund": "استرداد", "referral": "إحالة", "adjustment": "تعديل"}
 
 
@@ -116,7 +122,8 @@ async def _amount_screen(uid: int, method_code: str, state: FSMContext) -> tuple
     if gap:
         suggested = float(max(Decimal(str(gap)), min_usd).quantize(Decimal("1")) + (1 if Decimal(str(gap)) % 1 else 0))
         text += T.TOPUP_AMOUNT_SUGGEST.format(gap=fmt(gap))
-    return text, K.topup_amounts(presets, suggested)
+    _, max_usd = await _limits()
+    return text, K.topup_amounts(presets, suggested, fmt(min_usd), fmt(max_usd))
 
 
 @router.callback_query(F.data.startswith("bal:m:"))
@@ -184,11 +191,18 @@ def _parse_amount(raw: str) -> Decimal | None:
         return None
 
 
+@router.callback_query(Topup.amount, F.data == "bal:amt:type")
+async def cb_amount_type(cb: CallbackQuery) -> None:
+    lo, hi = await _limits()
+    await cb.message.answer(T.TOPUP_AMOUNT_TYPE.format(min=fmt(lo), max=fmt(hi)), reply_markup=K.cancel_input("bal:cancel"))
+    await cb.answer()
+
+
 @router.callback_query(Topup.amount, F.data.startswith("bal:amt:"))
 async def cb_amount(cb: CallbackQuery, state: FSMContext) -> None:
     amount = _parse_amount(cb.data.split(":")[2])
-    min_usd = Decimal(str(await settings_repo.get("min_topup_usd", 5)))
-    if amount is None or amount < min_usd:
+    min_usd, max_usd = await _limits()
+    if amount is None or amount < min_usd or amount > max_usd:
         await cb.answer(T.TOPUP_AMOUNT_TOO_LOW.format(min=fmt(min_usd)).replace("<b>", "").replace("</b>", ""), show_alert=True)
         return
     await _create_and_show(cb.message, cb.from_user.id, amount, state, edit=True)
@@ -200,15 +214,15 @@ async def msg_amount(message: Message, state: FSMContext) -> None:
     if message.text.startswith("/") or message.text in T.MAIN_BUTTONS:
         return  # تتركه للأوامر/القوائم (راوترات أخرى) — لا نبتلعه
     amount = _parse_amount(message.text)
-    min_usd = Decimal(str(await settings_repo.get("min_topup_usd", 5)))
+    min_usd, max_usd = await _limits()
     if amount is None:
         await message.answer(T.TOPUP_AMOUNT_INVALID)
         return
     if amount < min_usd:
         await message.answer(T.TOPUP_AMOUNT_TOO_LOW.format(min=fmt(min_usd)))
         return
-    if amount > TOPUP_MAX:
-        await message.answer(T.TOPUP_AMOUNT_TOO_HIGH.format(max=fmt(TOPUP_MAX)))
+    if amount > max_usd:
+        await message.answer(T.TOPUP_AMOUNT_TOO_HIGH.format(max=fmt(max_usd)))
         return
     await _create_and_show(message, message.from_user.id, amount, state, edit=False)
 

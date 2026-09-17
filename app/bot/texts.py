@@ -6,6 +6,8 @@
 from __future__ import annotations
 
 from app.config import settings
+from decimal import Decimal
+
 from app.services import pricing as P
 import html as _html
 
@@ -74,8 +76,9 @@ def meta_intro() -> str:
     ]
     for p in P.META_PACKAGES:
         lines.append(f"{p.emoji} <b>{p.title}</b> — {P.fmt(p.price)}  ·  {P.fmt(p.daily)} × {P.days_word(p.days)}\n<i>{p.blurb}</i>")
-    lines.append(f"\n🛠️ <b>إعلان مخصص</b> — أنت تحدد الميزانية والمدة (من 2$/يوم)\n"
-                 f"📦 <b>{P.BUNDLE_STORE_LAUNCH['title']}</b> — {P.fmt(P.BUNDLE_STORE_LAUNCH['price'])}: {P.BUNDLE_STORE_LAUNCH['includes']}")
+    lines.append(f"\n🛠️ <b>إعلان مخصص</b> — أنت تحدد الميزانية والمدة (من {P.fmt(P.META_MIN_DAILY)}/يوم)")
+    if P.bundle_enabled():
+        lines.append(f"📦 <b>{P.BUNDLE_STORE_LAUNCH['title']}</b> — {P.fmt(P.BUNDLE_STORE_LAUNCH['price'])}: {P.BUNDLE_STORE_LAUNCH['includes']}")
     return "\n".join(lines)
 
 
@@ -88,13 +91,15 @@ META_DIFF = (
 )
 
 # ───────────── T0 تيليغرام ─────────────
-TG_INTRO = (
-    "✈️ <b>ترويج تيليغرام — طريقتان:</b>\n\n"
-    f"📣 <b>الإعلان الرسمي (Telegram Ads):</b> يظهر داخل القنوات العامة كإعلان ممول من تيليغرام نفسه. "
-    f"من {P.fmt(P.TG_ADS_MIN_BUDGET)}، والسعر = الميزانية × {P.TG_ADS_MULT}.\n\n"
-    "📝 <b>القنوات الشريكة:</b> منشور فعلي داخل قناة نتفق معها، بسعر ثابت لكل قناة حسب حجمها.\n\n"
-    "💡 الرسمي للوصول الواسع والمنظّم، والشريك للجمهور المحلي المركّز."
-)
+def tg_intro() -> str:
+    return (
+        "✈️ <b>ترويج تيليغرام — طريقتان:</b>\n\n"
+        f"📣 <b>الإعلان الرسمي (Telegram Ads):</b> يظهر داخل القنوات العامة كإعلان ممول من تيليغرام نفسه. "
+        f"من {P.fmt(P.TG_ADS_MIN_BUDGET)}، والسعر = الميزانية × {P.TG_ADS_MULT}.\n\n"
+        "📝 <b>القنوات الشريكة:</b> منشور فعلي داخل قناة نتفق معها، بسعر ثابت لكل قناة حسب حجمها.\n\n"
+        "💡 الرسمي للوصول الواسع والمنظّم، والشريك للجمهور المحلي المركّز."
+    )
+
 
 # ───────────── D0 تصميم ─────────────
 def design_intro() -> str:
@@ -282,10 +287,12 @@ def prices_ads() -> str:
     rows = [f"💲 <b>أسعار الإعلانات</b>\n", "<b>📢 فيسبوك / إنستغرام</b>"]
     for p in P.META_PACKAGES:
         rows.append(f"{p.emoji} {p.title}: {P.fmt(p.daily)} × {P.days_word(p.days)} = <b>{P.fmt(p.price)}</b>")
-    b, pr, _ = P.meta_custom_price(4, 7)
-    rows.append(f"🛠️ مخصص: من 2$/يوم ومن يوم واحد — مثال 4$ × 7 أيام (ميزانية {P.fmt(b)}) = <b>{P.fmt(pr)}</b>")
-    rows.append(f"📦 {P.BUNDLE_STORE_LAUNCH['title']}: <b>{P.fmt(P.BUNDLE_STORE_LAUNCH['price'])}</b> بدل {P.fmt(P.bundle_separate_total())}")
-    rows.append("<i>القاعدة: السعر = ميزانية الإعلان × 1.30 — شامل رسوم الشريك وخدمتنا.</i>")
+    ex_daily = max(P.META_MIN_DAILY, Decimal(4))
+    b, pr, _ = P.meta_custom_price(ex_daily, 7)
+    rows.append(f"🛠️ مخصص: من {P.fmt(P.META_MIN_DAILY)}/يوم ومن يوم واحد — مثال {P.fmt(ex_daily)} × 7 أيام (ميزانية {P.fmt(b)}) = <b>{P.fmt(pr)}</b>")
+    if P.bundle_enabled():
+        rows.append(f"📦 {P.BUNDLE_STORE_LAUNCH['title']}: <b>{P.fmt(P.BUNDLE_STORE_LAUNCH['price'])}</b> بدل {P.fmt(P.bundle_separate_total())}")
+    rows.append(f"<i>القاعدة: السعر = ميزانية الإعلان × {P.CLIENT_MULT} — شامل رسوم الشريك وخدمتنا.</i>")
     rows.append("\n<b>✈️ تيليغرام</b>")
     rows.append(f"📣 الإعلان الرسمي: الميزانية × {P.TG_ADS_MULT} — مثال 20$ = <b>{P.fmt(P.tg_ads_price(20))}</b> (الحد الأدنى {P.fmt(P.TG_ADS_MIN_BUDGET)})")
     rows.append(f"📝 القنوات الشريكة: حسب القناة — مثال قناة بـ 8$ = <b>{P.fmt(P.tg_post_price(8))}</b>، مثبّت <b>{P.fmt(P.tg_post_price(8, pinned=True))}</b>")
@@ -335,9 +342,10 @@ def meta_intro_v3() -> str:
     ]
     for p in P.META_PACKAGES:
         lines.append(f"{p.emoji} <b>{p.title}</b> — <b>{P.fmt(p.price)}</b>  ·  {P.fmt(p.daily)} × {P.days_word(p.days)} — <i>{p.blurb}</i>")
-    lines.append(f"\n🛠️ <b>إعلان مخصص</b> — أنت تحدد الميزانية (من 2$/يوم) والمدة (1 – 30 يوماً)\n"
-                 f"📦 <b>{P.BUNDLE_STORE_LAUNCH['title']}</b> — <b>{P.fmt(P.BUNDLE_STORE_LAUNCH['price'])}</b> بدل "
-                 f"{P.fmt(P.bundle_separate_total())}: {P.BUNDLE_STORE_LAUNCH['includes']}")
+    lines.append(f"\n🛠️ <b>إعلان مخصص</b> — أنت تحدد الميزانية (من {P.fmt(P.META_MIN_DAILY)}/يوم) والمدة (1 – {P.META_MAX_DAYS} يوماً)")
+    if P.bundle_enabled():
+        lines.append(f"📦 <b>{P.BUNDLE_STORE_LAUNCH['title']}</b> — <b>{P.fmt(P.BUNDLE_STORE_LAUNCH['price'])}</b> بدل "
+                     f"{P.fmt(P.bundle_separate_total())}: {P.BUNDLE_STORE_LAUNCH['includes']}")
     lines.append("\nاختر الباقة 👇")
     return "\n".join(lines)
 
@@ -555,17 +563,29 @@ CHANNEL_BOUND_NOTICE = "✅ هذه القناة الآن هي <b>{kind}</b> لب
 
 
 # ═══════════════ 📣 Telegram Ads — المعالج (TA1–TA6) ═══════════════
-TGA_INTRO_NOTE = (
-    "📣 <b>إعلان Telegram Ads الرسمي</b>\n"
-    "يظهر إعلانك كرسالة ممولة داخل القنوات العامة الكبيرة (أكثر من 1000 مشترك) — بختم «ممول» من تيليغرام نفسه، "
-    "وننفّذه من حسابنا الإعلاني المعتمد.\n\n"
-    f"• الحد الأدنى <b>{P.fmt(P.TG_ADS_MIN_BUDGET)}</b> — السعر شامل = الميزانية × {P.TG_ADS_MULT}\n"
-    "• نص حتى <b>160 حرفاً</b> + زر يفتح قناتك أو بوتك\n"
-    "• يمرّ بمراجعة تيليغرام (عادةً {hours} ساعة) ثم ينطلق\n\n"
-    "💵 <b>كم ميزانية الإعلان؟</b> اختر أو اكتب مبلغاً بالدولار:\n"
-    "<i>الخطوة 1 من 5</i>"
-)
-TGA_BUDGET_INVALID = f"اكتب مبلغاً بين {P.fmt(P.TG_ADS_MIN_BUDGET)} و {P.fmt(P.TG_ADS_MAX_BUDGET)} — مثال: <code>25</code>"
+def tga_intro_note(hours: str) -> str:
+    return (
+        "📣 <b>إعلان Telegram Ads الرسمي</b>\n"
+        "يظهر إعلانك كرسالة ممولة داخل القنوات العامة الكبيرة (أكثر من 1000 مشترك) — بختم «ممول» من تيليغرام نفسه، "
+        "وننفّذه من حسابنا الإعلاني المعتمد.\n\n"
+        f"• الحد الأدنى <b>{P.fmt(P.TG_ADS_MIN_BUDGET)}</b> — السعر شامل = الميزانية × {P.TG_ADS_MULT}\n"
+        "• نص حتى <b>160 حرفاً</b> + زر يفتح قناتك أو بوتك\n"
+        f"• يمرّ بمراجعة تيليغرام (عادةً {hours} ساعة) ثم ينطلق\n\n"
+        "💵 <b>كم ميزانية الإعلان؟</b> اختر مبلغاً أو اكتبه بنفسك:\n"
+        "<i>الخطوة 1 من 5</i>"
+    )
+
+
+def tga_budget_invalid() -> str:
+    return f"اكتب مبلغاً بين {P.fmt(P.TG_ADS_MIN_BUDGET)} و {P.fmt(P.TG_ADS_MAX_BUDGET)} — مثال: <code>25</code>"
+
+
+TGA_BUDGET_TYPE = ("✏️ اكتب مبلغ الميزانية بالدولار — أي رقم بين <b>{min}</b> و <b>{max}</b>، مثال: <code>25</code>\n"
+                   "<i>السعر النهائي يظهر فوراً بعد الإرسال.</i>")
+META_DAILY_TYPE = ("✏️ اكتب الميزانية اليومية بالدولار — من <b>{min}</b>، مثال: <code>4</code>\n"
+                   "<i>بعدها نسألك عن عدد الأيام (1 – {days}).</i>")
+TOPUP_AMOUNT_TYPE = "✏️ اكتب المبلغ بالدولار — أي رقم بين <b>{min}</b> و <b>{max}</b>، مثال: <code>15</code>"
+MAINTENANCE = "🛠️ <b>الطلبات الجديدة متوقفة مؤقتاً</b>\n{msg}\n\n<i>رصيدك وطلباتك السابقة متاحة كالمعتاد.</i>"
 TGA_TARGET = (
     "🎯 <b>كيف نستهدف الجمهور؟</b>\n"
     "الميزانية: <b>{budget}</b> → السعر <b>{price}</b>\n\n"
@@ -677,3 +697,8 @@ ADMIN_TGA_RESULTS_INVALID = "اكتب رقمين: المشاهدات ثم الن
 TGP_SOON = "📝 القنوات الشريكة قيد التجهيز — بنفتحها أول ما نوقّع مع أول قناة. جرّب الإعلان الرسمي 📣 الآن."
 ADMIN_TGA_ASK_TEXT = "✍️ اكتب نص الإعلان الذي صغته للعميل #ORD-{id} (حتى 160 حرفاً) — سيُحفظ في الطلب ويصل العميل للاطلاع:"
 TGA_TEXT_BY_TEAM = "✍️ <b>#ORD-{id}: جهّز فريقنا نص إعلانك:</b>\n<code>{text}</code>\n\nسننشئ الإعلان به الآن. إذا أردت تعديلاً بسيطاً راسلنا من «مساعدة بهذا الطلب» خلال ساعة."
+
+CPANEL_OPEN = ("🖥️ <b>Cpanel</b> — لوحة الإدارة الكاملة داخل تيليغرام\n"
+               "الأسعار · طرق الدفع · الخدمات · القنوات · الإحصائيات · سجل التغييرات\n\n"
+               "<i>تُفتح لك وحدك (تحقق بتوقيع تيليغرام). أول فتحة بعد نوم السيرفر قد تأخذ ثوانٍ.</i>")
+CPANEL_LOCAL_ONLY = "🖥️ Cpanel تعمل فقط عندما يكون البوت منشوراً برابط https (Render) — محلياً استخدم لوحة الأزرار /admin."

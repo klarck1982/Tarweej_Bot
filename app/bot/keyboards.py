@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 from aiogram.types import (
+    WebAppInfo,
     CopyTextButton,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
@@ -18,6 +19,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from app.bot import texts as T
 from app.config import settings
+from app.services import cpanel as CP
 from app.services import pricing as P
 from app.services import targeting as TG
 
@@ -43,22 +45,34 @@ def home_bar() -> ReplyKeyboardMarkup:
     )
 
 
-def main_menu(is_admin: bool = False, balance: str = "0$", attention: int = 0) -> InlineKeyboardMarkup:
+def main_menu(is_admin: bool = False, balance: str = "0$", attention: int = 0,
+              services: dict | None = None) -> InlineKeyboardMarkup:
     """القائمة الرئيسية — التصميم B (مدمج بنمط Ichancy، 7 أسطر بلا تمرير):
 
     زر عنوان عريض · فيسبوك/إنستغرام بعرض كامل (الأهم) · أزواج منطقية بنصف الشاشة لكل زر ·
     قناة العروض تظهر فقط إذا ضُبط UPDATES_CHANNEL · زر الإدارة يحمل عدّاد ما ينتظر الأدمن.
     """
-    rows = [
-        [ib(T.BTN_TITLE, "nav:title")],
-        [ib(T.BTN_META, "nav:meta", "primary")],
-        [ib(T.BTN_TG, "nav:tg"), ib(T.BTN_DESIGN, "nav:design")],
+    svc = services or {}
+    hide = CP.rt("disabled_style") == "hide"
+
+    def on(k: str) -> bool:
+        return not hide or svc.get(k, True)
+
+    rows = [[ib(T.BTN_TITLE, "nav:title")]]
+    if on("meta"):
+        rows.append([ib(T.BTN_META, "nav:meta", "primary")])
+    pair = [ib(T.BTN_TG, "nav:tg")] if (on("tg_ads") or on("tg_post")) else []
+    if on("addons") or on("ai_reel"):
+        pair.append(ib(T.BTN_DESIGN, "nav:design"))
+    if pair:
+        rows.append(pair)
+    rows += [
         [ib(f"{T.BTN_BALANCE} · {balance}", "bal:menu"), ib(T.BTN_TOPUP, "bal:topup", "success")],
         [ib(T.BTN_ORDERS, "nav:orders")],
         [ib(T.BTN_SUPPORT, "sup:menu"), ib(T.BTN_INFO, "info:menu")],
     ]
-    if settings.updates_channel:
-        rows.append([url_btn(f"{T.BTN_CHANNEL} ↗", settings.updates_channel)])
+    if CP.rt("updates_channel"):
+        rows.append([url_btn(f"{T.BTN_CHANNEL} ↗", CP.rt("updates_channel"))])
     if is_admin:
         label = T.BTN_ADMIN + (f" · 🔔 {attention} بانتظارك" if attention else "")
         rows.append([ib(label, "adm:panel", "danger")])
@@ -88,7 +102,7 @@ def back(to: str, label: str = "◀️ رجوع") -> InlineKeyboardMarkup:
 
 def orders_empty() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
-        [ib(f"🚀 ابدأ بإعلان تجربة — {P.fmt(P.META_BY_CODE['trial'].price)}", "nav:meta", "primary")],
+        [ib(f"🚀 ابدأ بإعلان تجربة — {P.fmt(P.cheapest_package().price)}" if P.cheapest_package() else "🚀 ابدأ بأول إعلان", "nav:meta", "primary")],
         [ib("🏠 القائمة", "nav:home")],
     ])
 
@@ -103,8 +117,10 @@ def meta_packages(enabled: bool = True, has_draft: bool = False) -> InlineKeyboa
     for i, p in enumerate(P.META_PACKAGES):
         rows.append([ib(f"{p.emoji} {p.title} — {P.fmt(p.price)} ({P.fmt(p.daily)} × {P.days_word(p.days)}){lock}",
                         f"meta:pkg:{p.code}", "primary" if i == 0 else None)])
-    rows.append([ib(f"🛠️ إعلان مخصص — أنت تحدد الميزانية والمدة{lock}", "meta:pkg:custom")])
-    rows.append([ib(f"📦 {P.BUNDLE_STORE_LAUNCH['title']} — {P.fmt(P.BUNDLE_STORE_LAUNCH['price'])} (نمو + نص + صورة){lock}", "meta:pkg:bundle")])
+    rows.append([ib(f"✏️ ميزانيتي بنفسي — اكتب المبلغ والأيام{lock}", "meta:pkg:custom")])
+    if P.bundle_enabled():
+        bp = P.META_BY_CODE[P.BUNDLE_STORE_LAUNCH["package"]]
+        rows.append([ib(f"📦 {P.BUNDLE_STORE_LAUNCH['title']} — {P.fmt(P.BUNDLE_STORE_LAUNCH['price'])} ({bp.title} + نص + صورة){lock}", "meta:pkg:bundle")])
     rows.append([ib("ℹ️ شو الفرق بين الباقات؟", "meta:diff")])
     rows.append([ib("🏠 القائمة", "nav:home")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
@@ -159,13 +175,14 @@ def topup_methods(usable: dict[str, dict]) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def topup_amounts(presets: list, suggested: float | None = None) -> InlineKeyboardMarkup:
+def topup_amounts(presets: list, suggested: float | None = None, min_label: str = "5$", max_label: str = "1000$") -> InlineKeyboardMarkup:
     b = InlineKeyboardBuilder()
     if suggested:
         b.row(ib(f"✨ {suggested:g}$ — لإكمال طلبك", f"bal:amt:{suggested:g}"))
     btns = [ib(f"{p:g}$", f"bal:amt:{p:g}") for p in presets]
     for i in range(0, len(btns), 3):
         b.row(*btns[i:i + 3])
+    b.row(ib(f"✏️ اكتب مبلغاً آخر ({min_label} – {max_label})", "bal:amt:type"))
     b.row(ib("❌ إلغاء", "bal:cancel", "danger"))
     b.row(ib("◀️ رجوع", "bal:topup"))
     return b.as_markup()
@@ -232,8 +249,8 @@ def support_menu() -> InlineKeyboardMarkup:
         [ib("🎫 فتح تذكرة", "sup:new")],
         [ib("📂 تذاكري", "sup:mine")],
     ]
-    if settings.support_username:
-        rows.append([url_btn("👤 تواصل مباشر", f"https://t.me/{settings.support_username}")])
+    if CP.rt("support_username"):
+        rows.append([url_btn("👤 تواصل مباشر", f"https://t.me/{CP.rt('support_username')}")])
     rows.append([ib("🏠 القائمة", "nav:home")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -263,8 +280,8 @@ def info_menu() -> InlineKeyboardMarkup:
         [ib("📜 الشروط", "info:terms")],
         [ib("✨ عن المنصة", "info:about")],
     ]
-    if settings.updates_channel:
-        rows.append([url_btn("📣 قناة التحديثات", settings.updates_channel)])
+    if CP.rt("updates_channel"):
+        rows.append([url_btn("📣 قناة التحديثات", CP.rt("updates_channel"))])
     rows.append([ib("🏠 القائمة", "nav:home")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -280,10 +297,14 @@ def info_back(start_cta: bool = False) -> InlineKeyboardMarkup:
 
 # ───────────── A0 الأدمن ─────────────
 
-def admin_panel(topups: int = 0, tasks: int = 0, tickets: int = 0, orders: int = 0, attention: int = 0) -> InlineKeyboardMarkup:
+def admin_panel(topups: int = 0, tasks: int = 0, tickets: int = 0, orders: int = 0, attention: int = 0,
+                cpanel_url: str | None = None) -> InlineKeyboardMarkup:
     def n(x: int) -> str:
         return f" ({x})" if x else ""
-    return InlineKeyboardMarkup(inline_keyboard=[
+    rows = []
+    if cpanel_url:
+        rows.append([InlineKeyboardButton(text="🖥️ فتح Cpanel ↗", web_app=WebAppInfo(url=cpanel_url), style="primary")])
+    return InlineKeyboardMarkup(inline_keyboard=rows + [
         [ib(f"📥 شحن معلّق{n(topups)}", "adm:topups", "primary" if topups else None)],
         [ib(f"📦 الطلبات المفتوحة{n(orders)}" + (f" · 🔔 {attention}" if attention else ""), "adm:orders",
             "primary" if attention else None)],
@@ -291,10 +312,17 @@ def admin_panel(topups: int = 0, tasks: int = 0, tickets: int = 0, orders: int =
         [ib(f"🎫 تذاكر{n(tickets)}", "adm:tickets", "primary" if tickets else None)],
         [ib("📊 إحصائيات", "adm:stats")],
         [ib("📣 بث رسالة", "adm:bc")],
-        [ib("⚙️ إعدادات", "adm:settings")],
+        [ib("⚙️ إعدادات سريعة", "adm:settings")],
         [ib("👤 بحث عن مستخدم", "adm:find")],
         [ib("🔄 تحديث", "adm:panel")],
         [ib("🏠 القائمة", "nav:home")],
+    ])
+
+
+def cpanel_open(url: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🖥️ فتح Cpanel ↗", web_app=WebAppInfo(url=url), style="primary")],
+        [ib("🛠️ لوحة الأزرار السريعة", "adm:panel")],
     ])
 
 
@@ -425,10 +453,12 @@ def _nav(back: str | None = None, cancel: str = "meta:cancel") -> list[list[Inli
 
 
 def meta_custom_daily(presets=(2, 3, 5, 10, 15, 20)) -> InlineKeyboardMarkup:
+    presets = tuple(p for p in presets if P.META_MIN_DAILY <= p <= P.META_MAX_DAILY) or (int(P.META_MIN_DAILY),)
     b = InlineKeyboardBuilder()
     btns = [ib(f"{p}$ / يوم", f"meta:daily:{p}") for p in presets]
     for i in range(0, len(btns), 3):
         b.row(*btns[i:i + 3])
+    b.row(ib(f"✏️ اكتب مبلغاً آخر (من {P.fmt(P.META_MIN_DAILY)}/يوم)", "meta:daily:type"))
     for r in _nav("meta:pkgs"):
         b.row(*r)
     return b.as_markup()
@@ -654,9 +684,12 @@ def _tga_nav(back: str | None = None) -> list[list[InlineKeyboardButton]]:
 
 def tga_budget() -> InlineKeyboardMarkup:
     b = InlineKeyboardBuilder()
-    btns = [ib(f"{p}$ → {P.fmt(P.tg_ads_price(p))}", f"tga:budget:{p}", "primary" if p == P.TG_ADS_PRESETS[1] else None)
-            for p in P.TG_ADS_PRESETS]
-    b.row(*btns[:2]); b.row(*btns[2:4]); b.row(btns[4])
+    presets = P.TG_ADS_PRESETS
+    star = presets[1] if len(presets) > 1 else presets[0]   # الخيار المقترح = الثاني
+    btns = [ib(f"{p}$ → {P.fmt(P.tg_ads_price(p))}", f"tga:budget:{p}", "primary" if p == star else None) for p in presets]
+    for i in range(0, len(btns), 2):
+        b.row(*btns[i:i + 2])
+    b.row(ib(f"✏️ اكتب مبلغاً آخر ({P.fmt(P.TG_ADS_MIN_BUDGET)} – {P.fmt(P.TG_ADS_MAX_BUDGET)})", "tga:budget:type"))
     for r in _tga_nav("nav:tg"):
         b.row(*r)
     return b.as_markup()

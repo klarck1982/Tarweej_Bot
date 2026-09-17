@@ -14,6 +14,7 @@ from aiogram.types import CallbackQuery, Message
 from app.bot import keyboards as K
 from app.bot import texts as T
 from app.config import settings
+from app.services import cpanel as CP
 from app.db import pool as db
 from app.db.repo import events, orders as orders_repo, settings as settings_repo, users as users_repo
 from app.services.pricing import fmt
@@ -77,14 +78,14 @@ async def cb_meta_diff(cb: CallbackQuery) -> None:
 async def m_tg(message: Message, state: FSMContext) -> None:
     await _guard_wizard(message, state)
     svc = await settings_repo.services()
-    await message.answer(T.TG_INTRO, reply_markup=K.tg_tracks(svc["tg_ads"], svc["tg_post"]))
+    await message.answer(T.tg_intro(), reply_markup=K.tg_tracks(svc["tg_ads"], svc["tg_post"]))
 
 
 @router.callback_query(F.data == "nav:tg")
 async def cb_nav_tg(cb: CallbackQuery, state: FSMContext) -> None:
     await state.clear()
     svc = await settings_repo.services()
-    await _show(cb, T.TG_INTRO, K.tg_tracks(svc["tg_ads"], svc["tg_post"]))
+    await _show(cb, T.tg_intro(), K.tg_tracks(svc["tg_ads"], svc["tg_post"]))
 
 
 @router.callback_query(F.data == "tgp:start")
@@ -167,7 +168,7 @@ async def cb_faq_item(cb: CallbackQuery) -> None:
 
 @router.callback_query(F.data.in_({"sup:new", "sup:mine"}))
 async def cb_ticket_soon(cb: CallbackQuery) -> None:
-    contact = f"@{settings.support_username}" if settings.support_username else T.NO_CONTACT
+    contact = f"@{CP.rt('support_username')}" if CP.rt("support_username") else T.NO_CONTACT
     await cb.message.answer(T.TICKET_SOON.format(contact=contact), reply_markup=K.home_only())
     await cb.answer()
 

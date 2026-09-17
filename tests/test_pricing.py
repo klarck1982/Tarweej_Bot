@@ -97,3 +97,29 @@ def test_tg_ads_quote():
         P.tg_ads_quote(9)
     with pytest.raises(ValueError):
         P.tg_ads_quote(501)
+
+
+def test_pricing_live_override_and_validate():
+    """Cpanel: تغيير المضاعف يسري على كل الدوال فوراً، والتحقق يرفض القيم الخاسرة."""
+    import copy
+    try:
+        P.apply({"tg_ads": {"mult": "1.40", "presets": [10, 25]}, "meta": {"mult": "1.50"}})
+        assert P.TG_ADS_MULT == Decimal("1.40") and P.TG_ADS_PRESETS == (10, 25)
+        assert P.tg_ads_quote(10)[1] == Decimal("14.00")
+        assert P.meta_price(Decimal("21")) == Decimal("31.50")
+        assert P.META_BY_CODE["growth"].price == Decimal("31.50")
+    finally:
+        P.apply({})
+    assert P.TG_ADS_MULT == Decimal("1.35") and P.tg_ads_quote(10)[1] == Decimal("13.50")
+    # التحقق
+    bad = copy.deepcopy(P.DEFAULTS); bad["meta"]["mult"] = "1.05"
+    with pytest.raises(ValueError):
+        P.validate(bad)
+    bad = copy.deepcopy(P.DEFAULTS); bad["packages"] = [p for p in bad["packages"] if p["code"] != "trial"]
+    with pytest.raises(ValueError):
+        P.validate(bad)
+    bad = copy.deepcopy(P.DEFAULTS); bad["tg_ads"]["presets"] = [5]
+    with pytest.raises(ValueError):
+        P.validate(bad)
+    clean = P.validate({"tg_ads": {"mult": "1,4"}})
+    assert clean["tg_ads"]["mult"] == "1.40" and clean["meta"]["mult"] == "1.30"

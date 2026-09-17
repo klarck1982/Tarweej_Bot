@@ -32,8 +32,9 @@ from app.bot.middlewares import ErrorsMiddleware, UserMiddleware
 from app.config import settings
 from app.db import pool as db
 from app.db.repo import users as users_repo
-from app.services import scheduler
+from app.services import cpanel, pricing, scheduler
 from app.web import make_app
+from app.web_cpanel import setup_cpanel
 
 logging.basicConfig(
     level=logging.INFO,
@@ -74,7 +75,8 @@ async def set_commands(bot: Bot) -> None:
     for admin_id in settings.admin_ids:
         try:
             await bot.set_my_commands(
-                user_cmds + [BotCommand(command="admin", description="لوحة الإدارة")],
+                user_cmds + [BotCommand(command="admin", description="لوحة الإدارة"),
+                             BotCommand(command="cpanel", description="Cpanel — لوحة التحكم الكاملة")],
                 scope=BotCommandScopeChat(chat_id=admin_id),
             )
         except Exception as e:  # noqa: BLE001 — الأدمن لم يضغط Start بعد
@@ -87,8 +89,22 @@ async def notify_admins(bot: Bot, text: str) -> None:
     await channels.alert(bot, text)
 
 
+async def set_cpanel_menu_button(bot: Bot) -> None:
+    """زر القائمة ≡ بجانب حقل الكتابة يفتح Cpanel — للأدمن فقط (يبقى الافتراضي لبقية المستخدمين)."""
+    url = cpanel.cpanel_url()
+    if not url:
+        return
+    from aiogram.types import MenuButtonWebApp, WebAppInfo
+    for admin_id in settings.admin_ids:
+        try:
+            await bot.set_chat_menu_button(chat_id=admin_id, menu_button=MenuButtonWebApp(text="Cpanel", web_app=WebAppInfo(url=url)))
+        except Exception as e:  # noqa: BLE001 — الأدمن لم يبدأ محادثة بعد
+            log.info("skip menu button for %s: %s", admin_id, e)
+
+
 async def on_startup(bot: Bot, migrations: list[str]) -> None:
     await set_commands(bot)
+    await set_cpanel_menu_button(bot)
     me = await bot.get_me()
     users_count = await users_repo.count_users()
     log.info("bot @%s started — v%s step %s mode=%s users=%s admins=%s",
@@ -102,11 +118,14 @@ async def on_startup(bot: Bot, migrations: list[str]) -> None:
 async def run() -> None:
     await db.init_pool(settings.database_url)
     migrations = await db.run_migrations()
+    await pricing.refresh()          # الأسعار الحية من settings["pricing"] (Cpanel)
+    await cpanel.refresh_runtime()   # الإعدادات العامة (الدعم، القناة، الصيانة…)
 
     bot = Bot(settings.bot_token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
     bot.session.middleware(WideButtonsMiddleware())  # أزرار بعرض الشاشة (انظر app/bot/wide.py)
     dp = build_dispatcher()
     app = make_app()
+    setup_cpanel(app, bot)   # /cpanel (Mini App) + /cpanel/api/*
     sched = scheduler.start(bot)   # إعادة المحاولات + انتهاء المسودات + مزامنة نور (داخل نفس العملية)
     try:
         await _serve(bot, dp, app, migrations)
