@@ -1,8 +1,12 @@
 """جدول الأسعار — مصدر واحد للحقيقة.
 
-الأرقام من مخطط المشروع (عمولة Nour Ads 10% + هامشنا).
-في الخطوة 3 تصبح هذه القيم قابلة للتعديل من لوحة الأدمن (جدول settings)؛
-الآن هي ثوابت تُستخدم في شاشات الأسعار والاختبارات.
+قاعدة إعلانات فيسبوك/إنستغرام (اتفاق 17/09/2026):
+    تكلفتنا عند نور  = ميزانية الإعلان × 1.10   (عمولة نور 10%)
+    سعر العميل       = ميزانية الإعلان × 1.30   (أغلى من نور للجمهور بـ 10 نقاط)
+    ربحنا            = 20% من الميزانية — بلا تقريب وبلا حد أدنى.
+    مثال: ميزانية 100$ ← ندفع لنور 110$ ← يدفع العميل 130$.
+
+الأرقام هنا ثوابت؛ في الخطوة 6 تصبح قابلة للتعديل من لوحة الأدمن (جدول settings).
 """
 
 from __future__ import annotations
@@ -10,7 +14,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from decimal import ROUND_HALF_UP, Decimal
 
-NOUR_FEE_PCT = Decimal("10")  # عمولة الشريك
+NOUR_FEE_PCT = Decimal("10")        # عمولة الشريك فوق الميزانية
+CLIENT_MULT = Decimal("1.30")       # سعر العميل = الميزانية × 1.30
+NOUR_MULT = 1 + NOUR_FEE_PCT / 100  # 1.10
 
 D = Decimal
 
@@ -28,6 +34,22 @@ def fmt(x: Decimal | float | int | str) -> str:
 
 # ───────────── Meta (فيسبوك / إنستغرام) ─────────────
 
+META_MIN_DAILY = D("2")          # حد نور الأدنى لليوم الواحد
+META_MAX_DAILY = D("500")
+META_MIN_DAYS, META_MAX_DAYS = 1, 30
+META_BOTH_MIN_DAILY = D("4")     # «كلاهما» = ميزانيتان ≥2$ لكل منصة
+
+
+def meta_cost(budget: Decimal) -> Decimal:
+    """ما ندفعه لنور مقابل ميزانية إعلان معيّنة."""
+    return money(D(str(budget)) * NOUR_MULT)
+
+
+def meta_price(budget: Decimal) -> Decimal:
+    """ما يدفعه العميل مقابل ميزانية إعلان معيّنة — حرفياً × 1.30."""
+    return money(D(str(budget)) * CLIENT_MULT)
+
+
 @dataclass(frozen=True)
 class MetaPackage:
     code: str
@@ -35,7 +57,6 @@ class MetaPackage:
     emoji: str
     daily: Decimal
     days: int
-    price: Decimal      # ما يدفعه العميل
     blurb: str
 
     @property
@@ -43,50 +64,55 @@ class MetaPackage:
         return money(self.daily * self.days)
 
     @property
-    def cost(self) -> Decimal:  # ما ندفعه للشريك = الميزانية + 10%
-        return money(self.budget * (1 + NOUR_FEE_PCT / 100))
+    def cost(self) -> Decimal:  # ما ندفعه للشريك
+        return meta_cost(self.budget)
+
+    @property
+    def price(self) -> Decimal:  # ما يدفعه العميل
+        return meta_price(self.budget)
 
     @property
     def margin(self) -> Decimal:
         return money(self.price - self.cost)
 
+    @property
+    def both_allowed(self) -> bool:
+        return self.daily >= META_BOTH_MIN_DAILY
+
 
 META_PACKAGES: tuple[MetaPackage, ...] = (
-    MetaPackage("trial", "تجربة", "🚀", D("2"), 5, D("14"), "لأول إعلان — تختبر التفاعل بأقل مبلغ"),
-    MetaPackage("growth", "نمو", "📈", D("3"), 7, D("28"), "الأنسب لأغلب المتاجر والصفحات"),
-    MetaPackage("pro", "احتراف", "💼", D("5"), 10, D("65"), "لإطلاق منتج أو عرض قوي"),
+    MetaPackage("trial", "تجربة", "🚀", D("2"), 5, "لأول إعلان — تختبر التفاعل بأقل مبلغ"),
+    MetaPackage("growth", "نمو", "📈", D("3"), 7, "الأنسب لأغلب المتاجر والصفحات"),
+    MetaPackage("pro", "احتراف", "💼", D("5"), 10, "لإطلاق منتج أو عرض قوي"),
 )
-
-META_MIN_DAILY = D("2")
-META_MIN_FEE = D("3")
+META_BY_CODE = {p.code: p for p in META_PACKAGES}
 
 
-def meta_custom_price(daily: Decimal | int | float, days: int) -> tuple[Decimal, Decimal, Decimal]:
-    """إعلان مخصص: يعيد (الميزانية، السعر للعميل، التكلفة لدينا).
-
-    الشرائح: ×1.30 حتى 50$ • ×1.25 من 50 إلى 200$ • ×1.20 فوق 200$ — وحد أدنى للرسوم 3$.
-    """
+def meta_custom_price(daily: Decimal | int | float | str, days: int) -> tuple[Decimal, Decimal, Decimal]:
+    """إعلان مخصص: يعيد (الميزانية، السعر للعميل، التكلفة لدينا). نفس القاعدة بلا شرائح ولا حد أدنى."""
     daily = D(str(daily))
     if daily < META_MIN_DAILY:
-        raise ValueError("الحد الأدنى للميزانية اليومية 2$")
-    if not 1 <= days <= 30:
-        raise ValueError("المدة بين 1 و 30 يوماً")
-    budget = money(daily * days)
-    if budget <= 50:
-        mult = D("1.30")
-    elif budget <= 200:
-        mult = D("1.25")
-    else:
-        mult = D("1.20")
-    price = money(budget * mult)
-    if price - budget < META_MIN_FEE:
-        price = money(budget + META_MIN_FEE)
-    cost = money(budget * (1 + NOUR_FEE_PCT / 100))
-    return budget, price, cost
+        raise ValueError(f"الحد الأدنى للميزانية اليومية {fmt(META_MIN_DAILY)}")
+    if daily > META_MAX_DAILY:
+        raise ValueError(f"الحد الأقصى للميزانية اليومية {fmt(META_MAX_DAILY)} — للمبالغ الأكبر تواصل مع الدعم")
+    if not META_MIN_DAYS <= int(days) <= META_MAX_DAYS:
+        raise ValueError(f"المدة بين {META_MIN_DAYS} و {META_MAX_DAYS} يوماً")
+    budget = money(daily * int(days))
+    return budget, meta_price(budget), meta_cost(budget)
 
 
-BUNDLE_STORE_LAUNCH = {"code": "store_launch", "title": "انطلاقة متجر", "price": D("39"),
-                       "includes": "إعلان «نمو» 7 أيام + نص إعلاني + تصميم صورة"}
+# باقة «انطلاقة متجر»: إعلان نمو (27.30$) + نص إعلاني (5$) + تصميم صورة (8$) = 40.30$ متفرقة → 38$
+BUNDLE_STORE_LAUNCH = {
+    "code": "store_launch", "title": "انطلاقة متجر", "emoji": "📦", "price": D("38"),
+    "package": "growth", "addons": ("copy", "design"),
+    "includes": "إعلان «نمو» 7 أيام + نص إعلاني + تصميم صورة",
+}
+
+
+def bundle_separate_total() -> Decimal:
+    p = META_BY_CODE[BUNDLE_STORE_LAUNCH["package"]]
+    return money(p.price + sum(ADDONS[a]["price"] for a in BUNDLE_STORE_LAUNCH["addons"]))
+
 
 # ───────────── تيليغرام ─────────────
 
@@ -124,3 +150,15 @@ ADDON_BUNDLES = (
     {"title": "نص + صورة + ريل", "price": D("24"), "was": D("28")},
     {"title": "نص + صورتان + مونتاج", "price": D("46"), "was": D("54")},
 )
+
+
+def days_word(n: int) -> str:
+    """صياغة عربية سليمة: يوم واحد / يومان / 3 أيام / 11 يوماً."""
+    n = int(n)
+    if n == 1:
+        return "يوم واحد"
+    if n == 2:
+        return "يومان"
+    if 3 <= n <= 10:
+        return f"{n} أيام"
+    return f"{n} يوماً"

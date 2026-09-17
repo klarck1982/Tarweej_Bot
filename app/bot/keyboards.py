@@ -18,6 +18,8 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from app.bot import texts as T
 from app.config import settings
+from app.services import pricing as P
+from app.services import targeting as TG
 
 
 # ألوان الأزرار (Bot API 9.4): success أخضر · danger أحمر · primary أزرق · None رمادي
@@ -41,21 +43,25 @@ def home_bar() -> ReplyKeyboardMarkup:
     )
 
 
-def main_menu(is_admin: bool = False, balance: str = "0$") -> InlineKeyboardMarkup:
-    """القائمة الرئيسية داخل الرسالة (تصميم Ichancy): أزرق للخدمة الرئيسية، أخضر للشحن، أحمر للإدارة."""
-    # قاعدة التصميم: زر واحد في كل سطر = عرض الشاشة كاملاً (لا يبدو كقائمة جانبية على الهاتف)
+def main_menu(is_admin: bool = False, balance: str = "0$", attention: int = 0) -> InlineKeyboardMarkup:
+    """القائمة الرئيسية — التصميم B (مدمج بنمط Ichancy، 7 أسطر بلا تمرير):
+
+    زر عنوان عريض · فيسبوك/إنستغرام بعرض كامل (الأهم) · أزواج منطقية بنصف الشاشة لكل زر ·
+    قناة العروض تظهر فقط إذا ضُبط UPDATES_CHANNEL · زر الإدارة يحمل عدّاد ما ينتظر الأدمن.
+    """
     rows = [
+        [ib(T.BTN_TITLE, "nav:title")],
         [ib(T.BTN_META, "nav:meta", "primary")],
-        [ib(T.BTN_TG, "nav:tg")],
-        [ib(T.BTN_DESIGN, "nav:design")],
-        [ib(T.BTN_TOPUP, "bal:topup", "success")],
-        [ib(f"{T.BTN_BALANCE} · {balance}", "bal:menu")],
+        [ib(T.BTN_TG, "nav:tg"), ib(T.BTN_DESIGN, "nav:design")],
+        [ib(f"{T.BTN_BALANCE} · {balance}", "bal:menu"), ib(T.BTN_TOPUP, "bal:topup", "success")],
         [ib(T.BTN_ORDERS, "nav:orders")],
-        [ib(T.BTN_SUPPORT, "sup:menu")],
-        [ib(T.BTN_INFO, "info:menu")],
+        [ib(T.BTN_SUPPORT, "sup:menu"), ib(T.BTN_INFO, "info:menu")],
     ]
+    if settings.updates_channel:
+        rows.append([url_btn(f"{T.BTN_CHANNEL} ↗", settings.updates_channel)])
     if is_admin:
-        rows.append([ib(T.BTN_ADMIN, "adm:panel", "danger")])
+        label = T.BTN_ADMIN + (f" · 🔔 {attention} بانتظارك" if attention else "")
+        rows.append([ib(label, "adm:panel", "danger")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -82,24 +88,26 @@ def back(to: str, label: str = "◀️ رجوع") -> InlineKeyboardMarkup:
 
 def orders_empty() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
-        [ib("🚀 ابدأ بإعلان تجربة — 14$", "nav:meta", "primary")],
+        [ib(f"🚀 ابدأ بإعلان تجربة — {P.fmt(P.META_BY_CODE['trial'].price)}", "nav:meta", "primary")],
         [ib("🏠 القائمة", "nav:home")],
     ])
 
 
 # ───────────── M0 باقات Meta (معاينة) ─────────────
 
-def meta_packages(enabled: bool = True) -> InlineKeyboardMarkup:
+def meta_packages(enabled: bool = True, has_draft: bool = False) -> InlineKeyboardMarkup:
     lock = "" if enabled else " 🔒"
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [ib(f"🚀 تجربة — 14$ (2$ × 5 أيام){lock}", "meta:pkg:trial")],
-        [ib(f"📈 نمو — 28$ (3$ × 7 أيام){lock}", "meta:pkg:growth")],
-        [ib(f"💼 احتراف — 65$ (5$ × 10 أيام){lock}", "meta:pkg:pro")],
-        [ib(f"🛠️ إعلان مخصص{lock}", "meta:pkg:custom")],
-        [ib(f"📦 انطلاقة متجر — 39${lock}", "meta:pkg:bundle")],
-        [ib("ℹ️ شو الفرق بين الباقات؟", "meta:diff")],
-        [ib("🏠 القائمة", "nav:home")],
-    ])
+    rows = []
+    if has_draft:
+        rows.append([ib("📦 أكمل طلبي المعلّق", "ord:resume", "success")])
+    for i, p in enumerate(P.META_PACKAGES):
+        rows.append([ib(f"{p.emoji} {p.title} — {P.fmt(p.price)} ({P.fmt(p.daily)} × {P.days_word(p.days)}){lock}",
+                        f"meta:pkg:{p.code}", "primary" if i == 0 else None)])
+    rows.append([ib(f"🛠️ إعلان مخصص — أنت تحدد الميزانية والمدة{lock}", "meta:pkg:custom")])
+    rows.append([ib(f"📦 {P.BUNDLE_STORE_LAUNCH['title']} — {P.fmt(P.BUNDLE_STORE_LAUNCH['price'])} (نمو + نص + صورة){lock}", "meta:pkg:bundle")])
+    rows.append([ib("ℹ️ شو الفرق بين الباقات؟", "meta:diff")])
+    rows.append([ib("🏠 القائمة", "nav:home")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def meta_diff_back() -> InlineKeyboardMarkup:
@@ -133,8 +141,10 @@ def design_services(enabled: bool = True, ai_on: bool = False) -> InlineKeyboard
 
 # ───────────── B الرصيد والشحن ─────────────
 
-def balance_menu(pending_id: int | None = None) -> InlineKeyboardMarkup:
+def balance_menu(pending_id: int | None = None, draft_id: int | None = None) -> InlineKeyboardMarkup:
     rows = [[ib(T.BTN_TOPUP, "bal:topup", "success")], [ib("📜 سجل العمليات", "bal:hist:1")]]
+    if draft_id:
+        rows.insert(0, [ib(f"📦 أكمل طلبي المعلّق #ORD-{draft_id}", "ord:resume", "primary")])
     if pending_id:
         rows.insert(0, [ib(f"🟡 متابعة الشحن المعلّق #TOP-{pending_id}", f"bal:view:{pending_id}")])
     rows.append([ib("🏠 القائمة", "nav:home")])
@@ -270,11 +280,13 @@ def info_back(start_cta: bool = False) -> InlineKeyboardMarkup:
 
 # ───────────── A0 الأدمن ─────────────
 
-def admin_panel(topups: int = 0, tasks: int = 0, tickets: int = 0) -> InlineKeyboardMarkup:
+def admin_panel(topups: int = 0, tasks: int = 0, tickets: int = 0, orders: int = 0, attention: int = 0) -> InlineKeyboardMarkup:
     def n(x: int) -> str:
         return f" ({x})" if x else ""
     return InlineKeyboardMarkup(inline_keyboard=[
         [ib(f"📥 شحن معلّق{n(topups)}", "adm:topups", "primary" if topups else None)],
+        [ib(f"📦 الطلبات المفتوحة{n(orders)}" + (f" · 🔔 {attention}" if attention else ""), "adm:orders",
+            "primary" if attention else None)],
         [ib(f"🛠️ مهام يدوية{n(tasks)}", "adm:tasks", "primary" if tasks else None)],
         [ib(f"🎫 تذاكر{n(tickets)}", "adm:tickets", "primary" if tickets else None)],
         [ib("📊 إحصائيات", "adm:stats")],
@@ -295,6 +307,7 @@ def admin_settings_menu() -> InlineKeyboardMarkup:
         [ib("🔛 تشغيل / إيقاف الخدمات", "adm:svcs")],
         [ib("🏦 طرق الدفع والحسابات", "adm:wallets")],
         [ib("💱 سعر صرف الليرة", "adm:rate")],
+        [ib("👤 المعرّف الاحتياطي (نور)", "adm:fallback")],
         [ib("◀️ رجوع للوحة", "adm:panel")],
     ])
 
@@ -360,3 +373,234 @@ def admin_wallet_edit(code: str, m: dict) -> InlineKeyboardMarkup:
 
 def cancel_input(back_to: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[[ib("❌ إلغاء", back_to, "danger")]])
+
+
+# ═══════════════════════════ الخطوة 3 — معالج Meta (M0–M8) ═══════════════════════════
+
+def _nav(back: str | None = None, cancel: str = "meta:cancel") -> list[list[InlineKeyboardButton]]:
+    row = []
+    if back:
+        row.append(ib("◀️ رجوع", back))
+    row.append(ib("❌ إلغاء", cancel, "danger"))
+    return [row]
+
+
+def meta_custom_daily(presets=(2, 3, 5, 10, 15, 20)) -> InlineKeyboardMarkup:
+    b = InlineKeyboardBuilder()
+    btns = [ib(f"{p}$ / يوم", f"meta:daily:{p}") for p in presets]
+    for i in range(0, len(btns), 3):
+        b.row(*btns[i:i + 3])
+    for r in _nav("meta:pkgs"):
+        b.row(*r)
+    return b.as_markup()
+
+
+def meta_custom_days(presets=(3, 5, 7, 10, 14, 30)) -> InlineKeyboardMarkup:
+    b = InlineKeyboardBuilder()
+    btns = [ib(P.days_word(p), f"meta:days:{p}") for p in presets]
+    for i in range(0, len(btns), 3):
+        b.row(*btns[i:i + 3])
+    for r in _nav("meta:pkg:custom"):
+        b.row(*r)
+    return b.as_markup()
+
+
+def meta_platform(both_allowed: bool, back: str) -> InlineKeyboardMarkup:
+    rows = [
+        [ib("📘 فيسبوك", "meta:plat:facebook", "primary")],
+        [ib("📸 إنستغرام", "meta:plat:instagram")],
+    ]
+    if both_allowed:
+        rows.append([ib("📘📸 كلاهما", "meta:plat:both")])
+    rows += _nav(back)
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def meta_goal() -> InlineKeyboardMarkup:
+    rows = [[ib(("⭐ " if i == 0 else "") + name, f"meta:goal:{code}", "primary" if i == 0 else None)]
+            for i, (code, name, _) in enumerate(TG.GOALS)]
+    rows += _nav("meta:back:platform")
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def meta_country(more: bool = False) -> InlineKeyboardMarkup:
+    codes = TG.OTHER_COUNTRIES if more else TG.MAIN_COUNTRIES
+    b = InlineKeyboardBuilder()
+    btns = [ib(TG.country_label(c), f"meta:ctry:{c}", "primary" if c == "SY" and not more else None) for c in codes]
+    for i in range(0, len(btns), 2):
+        b.row(*btns[i:i + 2])
+    b.row(ib("◀️ الدول الرئيسية", "meta:ctry_page:0") if more else ib("🌐 دول أخرى", "meta:ctry_page:1"))
+    for r in _nav("meta:back:goal"):
+        b.row(*r)
+    return b.as_markup()
+
+
+def meta_provinces(code: str, selected: list[str]) -> InlineKeyboardMarkup:
+    b = InlineKeyboardBuilder()
+    provs = TG.PROVINCES.get(code, ())
+    btns = [ib(("✅ " if k in selected else "") + name, f"meta:prov:{k}", "success" if k in selected else None)
+            for k, name in provs]
+    for i in range(0, len(btns), 2):
+        b.row(*btns[i:i + 2])
+    b.row(ib("✔️ تم — كل الدولة" if not selected else f"✔️ تم ({len(selected)} محافظات)", "meta:prov_done", "primary"))
+    if selected:
+        b.row(ib("🧹 مسح الاختيار", "meta:prov_clear"))
+    for r in _nav("meta:back:country"):
+        b.row(*r)
+    return b.as_markup()
+
+
+def meta_audience(gender: str, age_min: int, age_max: int) -> InlineKeyboardMarkup:
+    b = InlineKeyboardBuilder()
+    b.row(*[ib(("• " if g == gender else "") + name, f"meta:gender:{g}", "success" if g == gender else None)
+            for g, name in TG.GENDERS])
+    btns = []
+    for lo, hi, label in TG.AGE_PRESETS:
+        cur = (lo, hi) == (age_min, age_max)
+        btns.append(ib(("• " if cur else "") + label, f"meta:age:{lo}:{hi}", "success" if cur else None))
+    for i in range(0, len(btns), 2):
+        b.row(*btns[i:i + 2])
+    b.row(ib("التالي ▶️", "meta:aud_done", "primary"))
+    for r in _nav("meta:back:country"):
+        b.row(*r)
+    return b.as_markup()
+
+
+def meta_text_step(back: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=_nav(back))
+
+
+def meta_media(n: int) -> InlineKeyboardMarkup:
+    rows = [[ib("✔️ تم — التالي" if n else "⏭️ تخطّي — المنشور جاهز", "meta:media_done", "primary")]]
+    if n:
+        rows.append([ib("🧹 حذف المرفقات", "meta:media_clear")])
+    rows += _nav("meta:back:desc")
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def meta_addon_copy(price: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [ib(f"✍️ نعم، اكتبوا لي النص (+{price})", "meta:addon:copy:1", "success")],
+        [ib("لا، عندي نصّي", "meta:addon:copy:0")],
+    ] + _nav("meta:back:media"))
+
+
+def meta_whatsapp_confirm(back: str = "meta:back:whatsapp") -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [ib("✅ صحيح", "meta:wa_ok", "success")],
+        [ib("✏️ تعديل الرقم", back)],
+    ] + _nav(None))
+
+
+def meta_username_missing() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [ib("✅ ضبطته — تحقق", "meta:uname_check", "success")],
+        [ib("⏭️ متابعة بدون معرّف", "meta:uname_skip")],
+    ] + _nav("meta:back:whatsapp"))
+
+
+def meta_summary(price_ok: bool, price: str, gap: str | None = None) -> InlineKeyboardMarkup:
+    rows = []
+    if price_ok:
+        rows.append([ib(f"✅ تأكيد الطلب — {price}", "meta:confirm", "success")])
+    else:
+        rows.append([ib(f"➕ اشحن {gap} وأكمل", "meta:topup_gap", "success")])
+    rows.append([ib("✏️ تعديل", "meta:edit")])
+    rows.append([ib("❌ إلغاء", "meta:cancel", "danger")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def meta_edit_menu() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [ib("📍 المنصة", "meta:back:platform"), ib("🎯 الهدف", "meta:back:goal")],
+        [ib("🌍 الدولة", "meta:back:country"), ib("👥 الجمهور", "meta:back:audience")],
+        [ib("🔗 الرابط", "meta:back:link"), ib("📝 الوصف", "meta:back:desc")],
+        [ib("🖼️ الملفات", "meta:back:media"), ib("📱 الواتساب", "meta:back:whatsapp")],
+        [ib("◀️ رجوع للملخص", "meta:back:summary")],
+    ])
+
+
+def meta_done(order_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [ib("📦 متابعة الطلب", f"ord:view:{order_id}", "primary")],
+        [ib("🏠 القائمة", "nav:home")],
+    ])
+
+
+def meta_draft_saved(order_id: int, gap: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [ib(f"➕ اشحن {gap} الآن", "meta:topup_gap", "success")],
+        [ib("🗑️ إلغاء المسودة", f"ord:draft_cancel:{order_id}", "danger")],
+        [ib("🏠 القائمة", "nav:home")],
+    ])
+
+
+# ───────────── O — طلباتي ─────────────
+
+def orders_list(rows_data: list[tuple[int, str]], page: int, pages: int, has_draft_id: int | None = None) -> InlineKeyboardMarkup:
+    b = InlineKeyboardBuilder()
+    if has_draft_id:
+        b.row(ib("📦 أكمل طلبي المعلّق", "ord:resume", "success"))
+    for oid, label in rows_data:
+        b.row(ib(label, f"ord:view:{oid}"))
+    if pages > 1:
+        nav = []
+        if page > 1:
+            nav.append(ib("◀️", f"ord:list:{page - 1}"))
+        nav.append(ib(f"{page} / {pages}", "nav:noop"))
+        if page < pages:
+            nav.append(ib("▶️", f"ord:list:{page + 1}"))
+        b.row(*nav)
+    b.row(ib("🚀 طلب جديد", "nav:meta", "primary"))
+    b.row(ib("🏠 القائمة", "nav:home"))
+    return b.as_markup()
+
+
+def order_view(order: dict) -> InlineKeyboardMarkup:
+    st = order["status"]
+    rows = []
+    if st == "awaiting_payment":
+        rows.append([ib("📦 أكمل الطلب", "ord:resume", "success")])
+        rows.append([ib("🗑️ إلغاء المسودة", f"ord:draft_cancel:{order['id']}", "danger")])
+    if st in ("completed", "rejected", "failed_submit", "refunded"):
+        rows.append([ib("🔁 إعادة الطلب بنفس الإعدادات", f"ord:renew:{order['id']}", "primary")])
+    if order.get("media_count"):
+        rows.append([ib("🖼️ عرض ملفاتي", f"ord:media:{order['id']}")])
+    rows.append([ib("💬 مساعدة بهذا الطلب", f"ord:help:{order['id']}")])
+    rows.append([ib("◀️ طلباتي", "ord:list:1"), ib("🏠 القائمة", "nav:home")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+# ───────────── الأدمن — الطلبات ─────────────
+
+def admin_orders_list(rows_data: list[tuple[int, str]]) -> InlineKeyboardMarkup:
+    b = InlineKeyboardBuilder()
+    for oid, label in rows_data:
+        b.row(ib(label, f"adm:ord:{oid}:view"))
+    b.row(ib("🔄 تحديث", "adm:orders"))
+    b.row(ib("◀️ رجوع للوحة", "adm:panel"))
+    return b.as_markup()
+
+
+def admin_order_card(order: dict, dry_run: bool, media_count: int = 0) -> InlineKeyboardMarkup:
+    oid = order["id"]
+    st = order["status"]
+    rows = []
+    if st == "paid":
+        rows.append([ib("📨 إعادة الإرسال لنور الآن", f"adm:ord:{oid}:submit", "primary")])
+    if st in ("submitted", "in_progress", "active", "paused") and not dry_run:
+        rows.append([ib("🔄 تحديث الحالة من نور", f"adm:ord:{oid}:sync")])
+    if dry_run and st in ("submitted", "in_progress", "active", "paused"):
+        nxt = {"submitted": [("🧪 ▶️ نور قَبِل (in_progress)", "in_progress"), ("🧪 ❌ نور رفض (استرداد)", "rejected")],
+               "in_progress": [("🧪 🟢 الإعلان انطلق (active)", "active"), ("🧪 ❌ نور رفض (استرداد)", "rejected")],
+               "active": [("🧪 ✅ اكتمل (completed)", "completed"), ("🧪 ⏸️ توقف مؤقتاً (paused)", "paused")],
+               "paused": [("🧪 🟢 استُؤنف (active)", "active"), ("🧪 ✅ اكتمل (completed)", "completed")]}[st]
+        for label, code in nxt:
+            rows.append([ib(label, f"adm:ord:{oid}:sim:{code}")])
+    if media_count:
+        rows.append([ib(f"📎 ملفات العميل ({media_count})", f"adm:ord:{oid}:media")])
+    rows.append([ib("💬 مراسلة العميل", f"adm:ord:{oid}:msg")])
+    if st in ("paid", "submitted", "in_progress", "active", "paused"):
+        rows.append([ib("↩️ استرداد كامل وإغلاق", f"adm:ord:{oid}:refund", "danger")])
+    rows.append([ib("◀️ الطلبات", "adm:orders")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)

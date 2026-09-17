@@ -19,7 +19,7 @@ from app.bot import keyboards as K
 from app.config import settings as app_settings
 from app.bot import texts as T
 from app.db import pool as db
-from app.db.repo import events, settings as settings_repo, topups as topups_repo, users as users_repo
+from app.db.repo import events, orders as orders_repo, settings as settings_repo, topups as topups_repo, users as users_repo
 from app.services import payments as PM
 from app.services.notify import notify_admins_topup
 from app.services.pricing import fmt, money
@@ -52,7 +52,11 @@ async def balance_view(uid: int) -> tuple[str, object]:
     pending = await topups_repo.get_pending_for_user(uid)
     if pending:
         text += T.BALANCE_PENDING.format(id=pending["id"], amount=fmt(pending["amount_usd"]))
-    return text, K.balance_menu(pending["id"] if pending else None)
+    draft = await orders_repo.get_awaiting(uid)
+    if draft:
+        gap = max(Decimal("0"), Decimal(draft["price_usd"]) - balance)
+        text += f"\n\n📦 عندك طلب معلّق <b>#ORD-{draft['id']}</b> بقيمة {fmt(draft['price_usd'])}" + (f" — ينقصك <b>{fmt(gap)}</b>." if gap > 0 else " — رصيدك يكفي، أكمله الآن!")
+    return text, K.balance_menu(pending["id"] if pending else None, draft["id"] if draft else None)
 
 
 @router.message(Command("balance"))
@@ -78,8 +82,11 @@ async def cb_balance(cb: CallbackQuery, state: FSMContext) -> None:
 # ───────────── B1 الطريقة ─────────────
 
 @router.callback_query(F.data == "bal:topup")
-async def cb_topup(cb: CallbackQuery, state: FSMContext) -> None:
-    await state.clear()
+async def cb_topup(cb: CallbackQuery, state: FSMContext, keep_data: bool = False) -> None:
+    if not keep_data:
+        await state.clear()
+    else:
+        await state.set_state(None)  # نحتفظ بـ gap_usd لاقتراح مبلغ الشحن
     usable = await PM.usable_methods()
     if not usable:
         await cb.message.answer(T.TOPUP_NO_METHODS, reply_markup=K.home_only())

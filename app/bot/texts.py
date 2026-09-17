@@ -11,18 +11,23 @@ from app.services import pricing as P
 BOT = settings.bot_name
 
 # ───────────── لوحة الرئيسية ─────────────
-BTN_META = "📢 إعلان فيسبوك/إنستغرام"
+BTN_TITLE = f"✨ {BOT}"                 # زر العنوان أعلى القائمة (تصميم B) — يعرض شعاراً منبثقاً
+BTN_META = "📢 إعلان فيسبوك / إنستغرام"
 BTN_TG = "✈️ ترويج تيليغرام"
 BTN_DESIGN = "🎨 تصميم وكتابة"
 BTN_ORDERS = "📦 طلباتي"
 BTN_BALANCE = "💰 رصيدي"
-BTN_SUPPORT = "🆘 الدعم"
-BTN_INFO = "ℹ️ الأسعار وكيف يعمل"
+BTN_SUPPORT = "💬 الدعم"
+BTN_INFO = "ℹ️ الأسعار"
+BTN_INFO_LONG = "ℹ️ الأسعار وكيف يعمل"
+BTN_CHANNEL = "📣 قناة العروض"
 BTN_ADMIN = "🛠️ لوحة الإدارة"
 BTN_HOME = "🏠 القائمة"          # الزر الوحيد في الشريط السفلي
 BTN_TOPUP = "➕ شحن رصيد"
 
-MAIN_BUTTONS = {BTN_META, BTN_TG, BTN_DESIGN, BTN_ORDERS, BTN_BALANCE, BTN_SUPPORT, BTN_INFO, BTN_ADMIN, BTN_HOME}
+MAIN_BUTTONS = {BTN_META, BTN_TG, BTN_DESIGN, BTN_ORDERS, BTN_BALANCE, BTN_SUPPORT, BTN_INFO, BTN_INFO_LONG,
+                BTN_ADMIN, BTN_HOME, "🆘 الدعم", "📢 إعلان فيسبوك/إنستغرام"}
+TITLE_TOAST = f"{BOT} ✨\nمنصة الترويج العربية — فيسبوك · إنستغرام · تيليغرام\nدفع مسبق بلا بطاقة، ومتابعة هنا في المحادثة."
 
 # ───────────── H0 الترحيب ─────────────
 WELCOME_NEW = (
@@ -61,7 +66,7 @@ def meta_intro() -> str:
         "<b>الباقات الجاهزة:</b>",
     ]
     for p in P.META_PACKAGES:
-        lines.append(f"{p.emoji} <b>{p.title}</b> — {P.fmt(p.price)}  ·  {P.fmt(p.daily)} × {p.days} أيام\n<i>{p.blurb}</i>")
+        lines.append(f"{p.emoji} <b>{p.title}</b> — {P.fmt(p.price)}  ·  {P.fmt(p.daily)} × {P.days_word(p.days)}\n<i>{p.blurb}</i>")
     lines.append(f"\n🛠️ <b>إعلان مخصص</b> — أنت تحدد الميزانية والمدة (من 2$/يوم)\n"
                  f"📦 <b>{P.BUNDLE_STORE_LAUNCH['title']}</b> — {P.fmt(P.BUNDLE_STORE_LAUNCH['price'])}: {P.BUNDLE_STORE_LAUNCH['includes']}")
     return "\n".join(lines)
@@ -218,10 +223,10 @@ REJECT_REASONS = [
 ]
 
 # ───────────── O الطلبات ─────────────
-ORDERS_EMPTY = "📦 <b>طلباتك</b>\n\nما عندك طلبات بعد.\nابدأ بإعلان تجربة بـ 14$ — أو صمّم منشورك أولاً 🎨"
+ORDERS_EMPTY = "📦 <b>طلباتك</b>\n\nما عندك طلبات بعد.\nابدأ بإعلان تجربة بـ {trial} — أو صمّم منشورك أولاً 🎨"
 
 # ───────────── S الدعم ─────────────
-SUPPORT_MENU = "🆘 <b>كيف نقدر نساعدك؟</b>"
+SUPPORT_MENU = "💬 <b>كيف نقدر نساعدك؟</b>"
 FAQ_MENU = "❓ <b>الأسئلة الشائعة</b> — اختر سؤالاً:"
 FAQ: list[tuple[str, str]] = [
     ("⏱️ كم يستغرق تفعيل الإعلان؟",
@@ -237,7 +242,7 @@ FAQ: list[tuple[str, str]] = [
      "الحد الأدنى للشحن 5$."),
     ("⏸️ هل أقدر أوقف الإعلان؟",
      "⏸️ <b>هل أقدر أوقف الإعلان؟</b>\n\n"
-     "نعم — من «📦 طلباتي» ← الطلب ← «طلب إيقاف مؤقت». يُنفَّذ يدوياً عبر فريق الشريك خلال ساعات.\n"
+     "نعم — من «📦 طلباتي» ← الطلب ← «💬 مساعدة بهذا الطلب» واطلب الإيقاف. يُنفَّذ يدوياً عبر فريق التنفيذ خلال ساعات.\n"
      "الميزانية المتبقية تبقى في حملتك وتُستأنف عند طلبك."),
     ("↩️ هل يوجد استرداد؟",
      "↩️ <b>هل يوجد استرداد؟</b>\n\n"
@@ -269,10 +274,11 @@ HOW_IT_WORKS = (
 def prices_ads() -> str:
     rows = [f"💲 <b>أسعار الإعلانات</b>\n", "<b>📢 فيسبوك / إنستغرام</b>"]
     for p in P.META_PACKAGES:
-        rows.append(f"{p.emoji} {p.title}: {P.fmt(p.daily)} × {p.days} أيام = <b>{P.fmt(p.price)}</b>")
+        rows.append(f"{p.emoji} {p.title}: {P.fmt(p.daily)} × {P.days_word(p.days)} = <b>{P.fmt(p.price)}</b>")
     b, pr, _ = P.meta_custom_price(4, 7)
-    rows.append(f"🛠️ مخصص: من 2$/يوم — مثال 4$ × 7 أيام (ميزانية {P.fmt(b)}) = <b>{P.fmt(pr)}</b>")
-    rows.append(f"📦 {P.BUNDLE_STORE_LAUNCH['title']}: <b>{P.fmt(P.BUNDLE_STORE_LAUNCH['price'])}</b>")
+    rows.append(f"🛠️ مخصص: من 2$/يوم ومن يوم واحد — مثال 4$ × 7 أيام (ميزانية {P.fmt(b)}) = <b>{P.fmt(pr)}</b>")
+    rows.append(f"📦 {P.BUNDLE_STORE_LAUNCH['title']}: <b>{P.fmt(P.BUNDLE_STORE_LAUNCH['price'])}</b> بدل {P.fmt(P.bundle_separate_total())}")
+    rows.append("<i>القاعدة: السعر = ميزانية الإعلان × 1.30 — شامل رسوم الشريك وخدمتنا.</i>")
     rows.append("\n<b>✈️ تيليغرام</b>")
     rows.append(f"📣 الإعلان الرسمي: الميزانية × {P.TG_ADS_MULT} — مثال 20$ = <b>{P.fmt(P.tg_ads_price(20))}</b> (الحد الأدنى {P.fmt(P.TG_ADS_MIN_BUDGET)})")
     rows.append(f"📝 القنوات الشريكة: حسب القناة — مثال قناة بـ 8$ = <b>{P.fmt(P.tg_post_price(8))}</b>، مثبّت <b>{P.fmt(P.tg_post_price(8, pinned=True))}</b>")
@@ -309,3 +315,208 @@ STARTUP_NOTICE = (
     "ترحيلات جديدة: {migrations}\n"
     "المستخدمون: {users}"
 )
+
+
+# ═══════════════════════════ الخطوة 3 — معالج إعلان فيسبوك/إنستغرام (M0–M8) ═══════════════════════════
+
+def meta_intro_v3() -> str:
+    lines = [
+        "📢 <b>إعلان فيسبوك / إنستغرام</b>\n"
+        "الأسعار <b>شاملة كل شي</b> — ما في رسوم مخفية، والدفع من رصيدك.\n"
+        "يتابع إعلانك <b>مدير حملة حقيقي</b> يتواصل معك قبل الإطلاق.\n",
+        "<b>الباقات الجاهزة:</b>",
+    ]
+    for p in P.META_PACKAGES:
+        lines.append(f"{p.emoji} <b>{p.title}</b> — <b>{P.fmt(p.price)}</b>  ·  {P.fmt(p.daily)} × {P.days_word(p.days)} — <i>{p.blurb}</i>")
+    lines.append(f"\n🛠️ <b>إعلان مخصص</b> — أنت تحدد الميزانية (من 2$/يوم) والمدة (1 – 30 يوماً)\n"
+                 f"📦 <b>{P.BUNDLE_STORE_LAUNCH['title']}</b> — <b>{P.fmt(P.BUNDLE_STORE_LAUNCH['price'])}</b> بدل "
+                 f"{P.fmt(P.bundle_separate_total())}: {P.BUNDLE_STORE_LAUNCH['includes']}")
+    lines.append("\nاختر الباقة 👇")
+    return "\n".join(lines)
+
+
+META_STEP = "<i>الخطوة {n} من 7</i>"
+
+META_CUSTOM_DAILY = (
+    "🛠️ <b>إعلان مخصص</b>\n\n"
+    "كم <b>الميزانية اليومية</b> للإعلان؟ اختر أو اكتب رقماً بالدولار (من 2$ حتى 500$).\n"
+    "<i>السعر النهائي = الميزانية الكلية × 1.30 — شامل كل الرسوم.</i>"
+)
+META_CUSTOM_DAYS = (
+    "🗓️ <b>كم يوماً يعمل الإعلان؟</b> (1 – 30)\n"
+    "الميزانية اليومية: <b>{daily}</b>\n\n"
+    "💡 نصيحة: 5 – 7 أيام على الأقل حتى تتعلّم خوارزمية فيسبوك جمهورك."
+)
+META_CUSTOM_INVALID_DAILY = "اكتب رقماً بين 2 و 500 — مثال: <code>4</code> أو <code>7.5</code>"
+META_CUSTOM_INVALID_DAYS = "اكتب عدد الأيام رقماً بين 1 و 30 — مثال: <code>7</code>"
+
+META_PLATFORM = (
+    "📍 <b>وين يظهر الإعلان؟</b>\n"
+    "{pkg}\n\n"
+    "📘 <b>فيسبوك</b> — الأوسع في سوريا والعراق ومصر.\n"
+    "📸 <b>إنستغرام</b> — للأزياء والجمال والمطاعم وجمهور الشباب.\n"
+    "{both_note}\n\n" + META_STEP.format(n=1)
+)
+META_PLATFORM_BOTH_OK = "📘📸 <b>كلاهما</b> — تُقسم الميزانية اليومية بالتساوي بين المنصتين."
+META_PLATFORM_BOTH_NO = "<i>خيار «كلاهما» متاح من 4$ يومياً (كل منصة تحتاج 2$ على الأقل) — متوفر في باقة احتراف والمخصص.</i>"
+
+META_GOAL = (
+    "🎯 <b>شو هدف الإعلان؟</b>\n\n"
+    "{goals}\n\n"
+    "💡 لو مو متأكد: <b>ترويج منشور</b> هو الخيار الآمن.\n" + META_STEP.format(n=2)
+)
+META_COUNTRY = (
+    "🌍 <b>في أي دولة يظهر الإعلان؟</b>\n"
+    "<i>دولة واحدة لكل إعلان — لاستهداف أكثر من دولة اطلب إعلاناً لكل دولة (نتائج أدق).</i>\n\n" + META_STEP.format(n=3)
+)
+META_PROVINCES = (
+    "🗺️ <b>{country} — اختر المحافظات</b>\n"
+    "اضغط لتحديد/إلغاء، ثم «تم». بلا اختيار = كل الدولة.\n\n"
+    "المحدد الآن: <b>{selected}</b>\n" + META_STEP.format(n=3)
+)
+META_AUDIENCE = (
+    "👥 <b>الجمهور</b>\n"
+    "الجنس: <b>{gender}</b>  ·  العمر: <b>{age}</b>\n\n"
+    "غيّر ما تريد ثم اضغط «التالي».\n" + META_STEP.format(n=4)
+)
+META_CONTENT_LINK = (
+    "🔗 <b>أرسل رابط المنشور أو الصفحة</b> اللي بدك تروّجها\n"
+    "(رابط فيسبوك أو إنستغرام — أو رابط موقعك لهدف «زيارات»).\n\n"
+    "مثال: <code>https://www.facebook.com/yourpage/posts/123</code>\n" + META_STEP.format(n=5)
+)
+META_CONTENT_LINK_INVALID = "الرابط مو واضح — انسخه كاملاً من زر «مشاركة» في فيسبوك/إنستغرام 🙂"
+META_CONTENT_DESC = (
+    "📝 <b>اكتب وصفاً قصيراً</b> يساعد مدير الحملة:\n"
+    "شو تبيع؟ مين جمهورك؟ في عرض معيّن؟ (سطر إلى 3 أسطر)\n\n"
+    "<i>مثال: متجر عبايات في دمشق، جمهوري نساء 20 – 45، عرض خصم 20% حتى نهاية الشهر.</i>\n" + META_STEP.format(n=5)
+)
+META_CONTENT_DESC_INVALID = "اكتب وصفاً من 10 أحرف على الأقل (حتى 600 حرف) 🙂"
+META_CONTENT_MEDIA = (
+    "🖼️ <b>عندك صور أو فيديو للإعلان؟</b> (اختياري)\n"
+    "أرسل حتى 3 ملفات الآن، أو اضغط «تخطّي» إذا المنشور جاهز على صفحتك.\n\n"
+    "المرفق حتى الآن: <b>{n}</b> / 3\n" + META_STEP.format(n=5)
+)
+META_ADDON_COPY = (
+    "✍️ <b>بدك نكتب لك نص الإعلان؟</b>\n"
+    "كاتب محترف يصيغ لك نصاً جذاباً مناسباً لهدفك — يُسلَّم خلال 24 ساعة قبل انطلاق الإعلان.\n"
+    "السعر: <b>+{price}</b>\n" + META_STEP.format(n=5)
+)
+META_WHATSAPP = (
+    "📱 <b>رقم الواتساب للتواصل</b>\n"
+    "مدير الحملة يتواصل معك عليه لإتمام الإعداد (قبول طلب الأدمن على صفحتك، تأكيد المنشور).\n\n"
+    "اكتب الرقم <b>مع رمز الدولة</b>: <code>+963 9xx xxx xxx</code>\n"
+    "<i>أو اكتبه محلياً 09xxxxxxxx وسنضيف +963 تلقائياً.</i>\n" + META_STEP.format(n=6)
+)
+META_WHATSAPP_INVALID = "الرقم مو واضح — اكتبه مع رمز الدولة مثل <code>+9639xxxxxxxx</code> 🙂"
+META_WHATSAPP_CONFIRM = "الرقم: <b>{wa}</b> — صحيح؟"
+META_USERNAME_MISSING = (
+    "👤 <b>حسابك ما إله معرّف (@username)</b>\n"
+    "فريق التنفيذ قد يتواصل معك على تيليغرام أيضاً — والمعرّف مطلوب لذلك.\n\n"
+    "<b>كيف تضبطه بخطوتين:</b>\n"
+    "1️⃣ الإعدادات ← <b>اسم المستخدم</b> (Username)\n"
+    "2️⃣ اكتب أي اسم متاح ← حفظ ← ارجع واضغط «✅ ضبطته»\n\n"
+    "<i>أو تابع بدونه: يتم التواصل معك على الواتساب فقط.</i>"
+)
+META_USERNAME_STILL_MISSING = "لسّا ما في معرّف على حسابك — احفظه في الإعدادات ثم اضغط «ضبطته» 🙂"
+META_USERNAME_OK = "✅ تم — معرّفك @{username}"
+
+META_SUMMARY = (
+    "🧾 <b>ملخص الطلب</b>\n\n"
+    "📦 الباقة: <b>{pkg}</b>\n"
+    "📍 المنصة: <b>{platform}</b>  ·  🎯 الهدف: <b>{goal}</b>\n"
+    "🌍 الاستهداف: <b>{geo}</b>\n"
+    "👥 الجمهور: <b>{gender}</b> · <b>{age}</b>\n"
+    "💵 الميزانية: <b>{daily} × {days} = {budget}</b>\n"
+    "🔗 الرابط: {link}\n"
+    "📝 الوصف: <i>{desc}</i>\n"
+    "🖼️ الملفات: <b>{media}</b>{addons}\n"
+    "📱 واتساب: <b>{wa}</b>  ·  👤 تيليغرام: <b>{tg}</b>\n\n"
+    "💰 <b>الإجمالي: {price}</b>  ·  رصيدك: <b>{balance}</b>\n"
+    "{balance_line}"
+)
+META_SUMMARY_OK = "بالضغط على «تأكيد» يُخصم المبلغ من رصيدك ويُرسل الطلب للتنفيذ."
+META_SUMMARY_GAP = "⚠️ ينقصك <b>{gap}</b> — حفظنا طلبك كمسودة، اشحن الفرق وارجع أكمله بضغطة."
+META_ADDON_LINE = "\n✍️ إضافات: <b>{names}</b> (+{total})"
+
+META_DONE = (
+    "🎉 <b>تم استلام طلبك #ORD-{id}</b>\n"
+    "الحالة: 🟡 <b>قيد المراجعة</b> — المبلغ {price} خُصم من رصيدك (المتبقي {balance}).\n\n"
+    "📋 <b>جهّز هذه الأشياء الآن حتى ينطلق إعلانك بسرعة:</b>\n"
+    "1️⃣ تأكد أنك <b>أدمن</b> على الصفحة/الحساب المراد الترويج منه.\n"
+    "2️⃣ خلّي المنشور المطلوب <b>منشوراً وعاماً</b>، أو جهّز الصورة والنص.\n"
+    "3️⃣ راقب <b>الواتساب {wa}</b> خلال الـ 24 ساعة القادمة.\n"
+    "4️⃣ قد يتواصل معك <b>فريق التنفيذ من حساب عادي</b> (بلا اسم شركة) — هذا طبيعي.\n\n"
+    "بنبلّغك هنا مع كل تغيير في الحالة 🔔"
+)
+META_DONE_DRY = "\n\n🧪 <i>وضع تجريبي: لم يُرسل شيء للشريك فعلياً — الأدمن يحاكي التنفيذ بالأزرار.</i>"
+META_DRAFT_SAVED = (
+    "💾 <b>حفظنا طلبك كمسودة #ORD-{id}</b>\n"
+    "الإجمالي {price} — رصيدك {balance} — ينقصك <b>{gap}</b>.\n\n"
+    "اشحن الفرق ثم اضغط «📦 أكمل طلبي المعلّق» — المسودة صالحة 7 أيام."
+)
+META_DRAFT_RESUME = "📦 <b>طلبك المعلّق #ORD-{id}</b> جاهز للإكمال — هذا ملخصه:"
+META_NO_DRAFT = "ما عندك طلب معلّق حالياً 👍"
+META_DRAFT_CANCELLED = "تم إلغاء المسودة #ORD-{id}."
+META_INSUFFICIENT_RACE = "تغيّر رصيدك أثناء التأكيد — راجع الملخص من جديد."
+META_CANCEL_WIZARD = "تم إلغاء الطلب — ما انخصم شي ✅"
+
+# ───────────── O — طلباتي ─────────────
+ORDERS_LIST = "📦 <b>طلباتك</b> — اضغط على طلب لعرض تفاصيله:"
+ORDER_VIEW = (
+    "{icon} <b>#ORD-{id} — {status}</b>\n\n"
+    "📦 {pkg}  ·  📍 {platform}\n"
+    "🌍 {geo}\n"
+    "💵 {daily} × {days} = {budget}  ·  💰 دفعت <b>{price}</b>\n"
+    "🔗 {link}\n"
+    "🕒 أُنشئ: {created}{timeline}\n\n"
+    "{hint}"
+)
+ORDER_HINTS = {
+    "awaiting_payment": "💤 بانتظار شحن الرصيد — اشحن الفرق ثم أكمل الطلب.",
+    "paid": "📨 يُرسل للتنفيذ الآن — خلال دقائق.",
+    "submitted": "🟡 فريق التنفيذ يراجع الطلب — عادةً خلال ساعات العمل.",
+    "in_progress": "🔵 مدير الحملة يجهّز إعلانك — راقب الواتساب، قد يتواصل معك من حساب عادي.",
+    "active": "🟢 إعلانك يعمل الآن! راقب رسائل صفحتك وزياراتك.",
+    "paused": "⏸️ الإعلان متوقف مؤقتاً — للاستئناف تواصل معنا من «مساعدة بهذا الطلب».",
+    "completed": "✅ اكتمل الإعلان. جدّده بضغطة أو اطلب تقرير النتائج من الدعم.",
+    "rejected": "❌ رُفض الإعلان من فريق التنفيذ وأُعيد المبلغ كاملاً لرصيدك. غالباً بسبب المحتوى أو الصفحة — راجع الدعم.",
+    "failed_submit": "⚠️ تعذّر إرسال الطلب وأُعيد المبلغ كاملاً. جرّب لاحقاً أو تواصل مع الدعم.",
+    "refunded": "↩️ أُعيد المبلغ لرصيدك.",
+    "cancelled": "🚫 ملغى.",
+}
+ORDER_STATUS_PUSH = {
+    "in_progress": "🔵 <b>#ORD-{id}: بدأ التجهيز!</b>\nمدير الحملة يجهّز إعلانك الآن — راقب واتساب {wa}، قد يصلك تواصل من حساب عادي.",
+    "active": "🟢 <b>#ORD-{id}: إعلانك انطلق!</b>\nيعمل الآن على {platform} لمدة {days}. راقب رسائل صفحتك 📩",
+    "paused": "⏸️ <b>#ORD-{id}: الإعلان متوقف مؤقتاً.</b>\nإذا ما طلبت الإيقاف، تواصل معنا من «مساعدة بهذا الطلب».",
+    "completed": "✅ <b>#ORD-{id}: اكتمل إعلانك.</b>\nشكراً لثقتك 🌟 — تقدر تجدّده بنفس الإعدادات بضغطة.",
+    "rejected": "❌ <b>#ORD-{id}: تعذّر تنفيذ الإعلان.</b>\nأُعيد <b>{price}</b> كاملاً إلى رصيدك (الآن {balance}). راجع الدعم لمعرفة السبب وإعادة الطلب.",
+    "failed_submit": "⚠️ <b>#ORD-{id}: تعذّر إرسال الطلب للتنفيذ.</b>\nأُعيد <b>{price}</b> كاملاً إلى رصيدك (الآن {balance}). نعتذر — جرّب لاحقاً.",
+    "refunded": "↩️ <b>#ORD-{id}: أُعيد {price} إلى رصيدك</b> (الآن {balance}).\nالسبب: {reason}",
+}
+
+# ───────────── الأدمن — بطاقة الطلب ─────────────
+ADMIN_ORDER_CARD = (
+    "{icon} <b>طلب #ORD-{id}</b> — {status}{dry}\n"
+    "👤 {name} {username} — <code>{uid}</code>\n"
+    "📦 {pkg} · 📍 {platform} · 🎯 {goal}\n"
+    "🌍 {geo} · 👥 {gender} {age}\n"
+    "💵 {daily} × {days} = {budget} → دفع <b>{price}</b> · تكلفة نور <b>{cost}</b>{charged} · ربح <b>{margin}</b>\n"
+    "🔗 {link}\n"
+    "📝 <i>{desc}</i>\n"
+    "🖼️ ملفات: {media}{addons}\n"
+    "📱 <code>{wa}</code> · 👤 {tg}\n"
+    "🆔 نور: <code>{nour_id}</code> · حالة نور: {nour_status}\n"
+    "🕒 {created}{note}"
+)
+ADMIN_ORDERS_EMPTY = "📦 لا توجد طلبات مفتوحة ✅"
+ADMIN_ORDERS_LIST = "📦 <b>الطلبات المفتوحة ({n})</b> — اضغط لفتح البطاقة:"
+ADMIN_ORDER_REFUND_CONFIRM = "↩️ استرداد <b>{price}</b> كاملاً للعميل وإغلاق #ORD-{id}؟ اكتب السبب بسطر واحد (سيصل للعميل):"
+ADMIN_ORDER_ALERT_NEW = "🔔 <b>طلب جديد #ORD-{id}</b> — {price} — {name}"
+ADMIN_ORDER_ALERT_STUCK = "⚠️ <b>#ORD-{id} عالق قبل نور</b>\n{note}"
+ADMIN_ORDER_ALERT_CHARGE = "⚠️ <b>#ORD-{id}: فرق في خصم نور</b>\n{note}"
+ADMIN_ORDER_SIM_HELP = "🧪 <b>محاكاة نور</b> — اضغط الحالة التالية كأنها جاءت من الشريك:"
+ADMIN_FALLBACK_EDIT = (
+    "👤 اكتب <b>معرّف تيليغرام الاحتياطي</b> (بدون @) — يُرسل لنور بدل معرّف العميل عندما لا يملك واحداً، فيصلك أنت تواصل مدير الحملة.\n"
+    "<i>الحالي: {current}</i>"
+)
+ADMIN_FALLBACK_SAVED = "✅ المعرّف الاحتياطي الآن: @{username}"

@@ -23,14 +23,16 @@ from aiohttp import web
 from app import STEP, VERSION
 from app.bot import texts as T
 from app.bot.fsm_storage import PostgresStorage
-from app.bot.handlers import fallback, menu, start, topup
+from app.bot.handlers import fallback, menu, meta_wizard, orders, start, topup
 from app.bot.wide import WideButtonsMiddleware
 from app.bot.handlers.admin import panel as admin_panel
+from app.bot.handlers.admin import orders as admin_orders
 from app.bot.handlers.admin import topups as admin_topups
 from app.bot.middlewares import ErrorsMiddleware, UserMiddleware
 from app.config import settings
 from app.db import pool as db
 from app.db.repo import users as users_repo
+from app.services import scheduler
 from app.web import make_app
 
 logging.basicConfig(
@@ -48,8 +50,11 @@ def build_dispatcher() -> Dispatcher:
     dp.callback_query.outer_middleware(UserMiddleware())
     # الترتيب مهم: الأدمن أولاً، ثم start، ثم القوائم، وأخيراً fallback يلتقط كل ما تبقّى
     dp.include_router(admin_topups.router)
+    dp.include_router(admin_orders.router)
     dp.include_router(admin_panel.router)
     dp.include_router(start.router)
+    dp.include_router(meta_wizard.router)   # قبل menu: يلتقط meta:* و ord:resume
+    dp.include_router(orders.router)
     dp.include_router(menu.router)
     dp.include_router(topup.router)
     dp.include_router(fallback.router)
@@ -103,9 +108,13 @@ async def run() -> None:
     bot.session.middleware(WideButtonsMiddleware())  # أزرار بعرض الشاشة (انظر app/bot/wide.py)
     dp = build_dispatcher()
     app = make_app()
+    sched = scheduler.start(bot)   # إعادة المحاولات + انتهاء المسودات + مزامنة نور (داخل نفس العملية)
     try:
         await _serve(bot, dp, app, migrations)
     finally:
+        sched.cancel()
+        from app.services import nour
+        await nour.close()
         await bot.session.close()
         await db.close_pool()
 

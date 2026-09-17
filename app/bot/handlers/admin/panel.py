@@ -33,15 +33,23 @@ async def _counters() -> dict:
           (SELECT count(*) FROM topups WHERE status = 'pending')                     AS topups,
           (SELECT count(*) FROM tasks  WHERE status IN ('new','in_progress','revision')) AS tasks,
           (SELECT count(*) FROM tickets WHERE status = 'open')                       AS tickets,
-          (SELECT count(*) FROM orders WHERE created_at >= date_trunc('day', now()) AND status <> 'draft') AS orders_today
+          (SELECT count(*) FROM orders WHERE paid_at >= date_trunc('day', now())) AS orders_today,
+          (SELECT count(*) FROM orders WHERE status IN ('paid','submitted','in_progress','active','paused')) AS orders_open
         """
     )
-    return dict(row)
+    c = dict(row)
+    from app.db.repo import orders as orders_repo
+    from app.services import nour
+    c["attention"] = await orders_repo.count_attention(nour.is_dry_run())
+    return c
 
 
 async def _panel_text() -> tuple[str, dict]:
     c = await _counters()
-    text = T.ADMIN_PANEL.format(version=VERSION, step=STEP, mode=settings.mode, **c)
+    from app.services import nour
+    mode = f"{settings.mode} · {'🧪 محاكاة نور' if nour.is_dry_run() else '🟢 نور حقيقي'}"
+    text = T.ADMIN_PANEL.format(version=VERSION, step=STEP, mode=mode, users=c["users"], new_today=c["new_today"],
+                                topups=c["topups"], tasks=c["tasks"], tickets=c["tickets"], orders_today=c["orders_today"])
     return text, c
 
 
@@ -49,14 +57,14 @@ async def _panel_text() -> tuple[str, dict]:
 @router.message(F.text == T.BTN_ADMIN)
 async def cmd_admin(message: Message) -> None:
     text, c = await _panel_text()
-    await message.answer(text, reply_markup=K.admin_panel(c["topups"], c["tasks"], c["tickets"]))
+    await message.answer(text, reply_markup=K.admin_panel(c["topups"], c["tasks"], c["tickets"], c["orders_open"], c["attention"]))
 
 
 @router.callback_query(F.data == "adm:panel")
 async def cb_panel(cb: CallbackQuery, state: FSMContext) -> None:
     await state.clear()
     text, c = await _panel_text()
-    kb = K.admin_panel(c["topups"], c["tasks"], c["tickets"])
+    kb = K.admin_panel(c["topups"], c["tasks"], c["tickets"], c["orders_open"], c["attention"])
     try:
         await cb.message.edit_text(text, reply_markup=kb)
     except TelegramBadRequest as e:

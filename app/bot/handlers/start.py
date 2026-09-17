@@ -26,7 +26,15 @@ async def show_main_menu(message: Message, user_id: int, is_admin: bool, greet_n
         text = f"{greet}\n\n{text}"
     elif greet_name:
         text = f"{T.WELCOME_BACK.format(name=greet_name)}\n\n{text}"
-    kb = K.main_menu(is_admin, fmt(balance))
+    attention = 0
+    if is_admin:
+        try:
+            from app.db.repo import orders as orders_repo, topups as topups_repo
+            from app.services import nour
+            attention = await topups_repo.count_pending() + await orders_repo.count_attention(nour.is_dry_run())
+        except Exception:  # noqa: BLE001
+            attention = 0
+    kb = K.main_menu(is_admin, fmt(balance), attention)
     if edit:
         try:
             await message.edit_text(text, reply_markup=kb)

@@ -17,6 +17,8 @@ services:
         value: Asia/Damascus
       - key: NOUR_DRY_RUN
         value: "1"
+      - key: BOT_NAME
+        value: "ترويج بوت"
       - key: BOT_TOKEN
         sync: false
       - key: DATABASE_URL

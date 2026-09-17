@@ -1,7 +1,7 @@
-"""أزرار اللوحة الرئيسية السبعة — كل زر يفتح فرعه.
+"""أزرار القائمة الرئيسية — كل زر يفتح فرعه.
 
-في الخطوة 1 تعمل بالكامل: ℹ️ المعلومات والأسعار، 🆘 الأسئلة الشائعة، 💰 عرض الرصيد، 📦 الطلبات (فارغة).
-شاشات الاختيار الأولى للخدمات (M0 / T0 / D0) تظهر كمعاينة، والمعالجات نفسها تأتي في الخطوات 2–6.
+يعمل بالكامل: 📢 Meta (M0 → المعالج في meta_wizard.py)، ℹ️ المعلومات والأسعار، 💬 الأسئلة الشائعة، 💰 الرصيد (topup.py)، 📦 الطلبات (orders.py).
+T0 / D0 معاينة — معالجاتها في الخطوتين 5 و6.
 """
 
 from __future__ import annotations
@@ -15,7 +15,7 @@ from app.bot import keyboards as K
 from app.bot import texts as T
 from app.config import settings
 from app.db import pool as db
-from app.db.repo import events, settings as settings_repo, users as users_repo
+from app.db.repo import events, orders as orders_repo, settings as settings_repo, users as users_repo
 from app.services.pricing import fmt
 
 router = Router(name="menu")
@@ -36,43 +36,39 @@ async def _show(cb: CallbackQuery, text: str, kb) -> None:
     await cb.answer()
 
 
+# ───────────── ✨ زر العنوان ─────────────
+
+@router.callback_query(F.data == "nav:title")
+async def cb_title(cb: CallbackQuery) -> None:
+    await cb.answer(T.TITLE_TOAST, show_alert=True)
+
+
 # ───────────── 📢 Meta ─────────────
 
-@router.message(F.text == T.BTN_META)
+async def _meta_screen(uid: int) -> tuple[str, object]:
+    svc = await settings_repo.services()
+    draft = await orders_repo.get_awaiting(uid)
+    return T.meta_intro_v3(), K.meta_packages(enabled=svc["meta"], has_draft=bool(draft))
+
+
+@router.message(F.text.in_({T.BTN_META, "📢 إعلان فيسبوك/إنستغرام"}))
 async def m_meta(message: Message, state: FSMContext) -> None:
     await _guard_wizard(message, state)
-    svc = await settings_repo.services()
-    await message.answer(T.meta_intro(), reply_markup=K.meta_packages(enabled=svc["meta"]))
+    text, kb = await _meta_screen(message.from_user.id)
+    await message.answer(text, reply_markup=kb)
 
 
 @router.callback_query(F.data == "nav:meta")
 async def cb_nav_meta(cb: CallbackQuery, state: FSMContext) -> None:
     await state.clear()
-    svc = await settings_repo.services()
-    await _show(cb, T.meta_intro(), K.meta_packages(enabled=svc["meta"]))
-
-
-@router.callback_query(F.data == "meta:pkgs")
-async def cb_meta_pkgs(cb: CallbackQuery) -> None:
-    svc = await settings_repo.services()
-    await cb.message.edit_text(T.meta_intro(), reply_markup=K.meta_packages(enabled=svc["meta"]))
-    await cb.answer()
+    text, kb = await _meta_screen(cb.from_user.id)
+    await _show(cb, text, kb)
 
 
 @router.callback_query(F.data == "meta:diff")
 async def cb_meta_diff(cb: CallbackQuery) -> None:
     await cb.message.edit_text(T.META_DIFF, reply_markup=K.meta_diff_back())
     await cb.answer()
-
-
-@router.callback_query(F.data.startswith("meta:pkg:"))
-async def cb_meta_pkg(cb: CallbackQuery) -> None:
-    svc = await settings_repo.services()
-    if not svc["meta"]:
-        await cb.answer(T.LOCKED_SERVICE, show_alert=True)
-        return
-    await events.log_event("meta_pkg_click", cb.from_user.id, pkg=cb.data.split(":")[-1])
-    await cb.answer(T.COMING_STEP.format(step=3).replace("<b>", "").replace("</b>", ""), show_alert=True)
 
 
 # ───────────── ✈️ تيليغرام ─────────────
@@ -139,33 +135,9 @@ async def cb_addon(cb: CallbackQuery) -> None:
     await cb.answer(T.COMING_STEP.format(step=6).replace("<b>", "").replace("</b>", ""), show_alert=True)
 
 
-# ───────────── 📦 الطلبات ─────────────
+# ───────────── 💬 الدعم ─────────────
 
-async def _orders_view(uid: int) -> tuple[str, object]:
-    n = await db.fetchval("SELECT count(*) FROM orders WHERE user_id = $1 AND status <> 'draft'", uid)
-    if not n:
-        return T.ORDERS_EMPTY, K.orders_empty()
-    return T.COMING_STEP.format(step=4), K.home_only()
-
-
-@router.message(Command("orders"))
-@router.message(F.text == T.BTN_ORDERS)
-async def m_orders(message: Message, state: FSMContext) -> None:
-    await _guard_wizard(message, state)
-    text, kb = await _orders_view(message.from_user.id)
-    await message.answer(text, reply_markup=kb)
-
-
-@router.callback_query(F.data == "nav:orders")
-async def cb_nav_orders(cb: CallbackQuery, state: FSMContext) -> None:
-    await state.clear()
-    text, kb = await _orders_view(cb.from_user.id)
-    await _show(cb, text, kb)
-
-
-# ───────────── 🆘 الدعم ─────────────
-
-@router.message(F.text == T.BTN_SUPPORT)
+@router.message(F.text.in_({T.BTN_SUPPORT, "🆘 الدعم"}))
 async def m_support(message: Message, state: FSMContext) -> None:
     await _guard_wizard(message, state)
     await message.answer(T.SUPPORT_MENU, reply_markup=K.support_menu())
@@ -206,7 +178,7 @@ async def cb_ticket_soon(cb: CallbackQuery) -> None:
 
 # ───────────── ℹ️ المعلومات ─────────────
 
-@router.message(F.text == T.BTN_INFO)
+@router.message(F.text.in_({T.BTN_INFO, T.BTN_INFO_LONG}))
 async def m_info(message: Message, state: FSMContext) -> None:
     await _guard_wizard(message, state)
     await message.answer(T.INFO_MENU, reply_markup=K.info_menu())

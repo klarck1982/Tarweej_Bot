@@ -111,7 +111,7 @@ def load_settings() -> Settings:
         webhook_secret=webhook_secret,
         port=port,
         tz=os.getenv("TZ", "Asia/Damascus").strip() or "Asia/Damascus",
-        bot_name=os.getenv("BOT_NAME", "روّج بوت").strip() or "روّج بوت",
+        bot_name=os.getenv("BOT_NAME", "ترويج بوت").strip() or "ترويج بوت",
         nour_ads_token=os.getenv("NOUR_ADS_TOKEN", "").strip(),
         nour_dry_run=os.getenv("NOUR_DRY_RUN", "1").strip() != "0",
         support_username=os.getenv("SUPPORT_USERNAME", "").strip().lstrip("@"),
