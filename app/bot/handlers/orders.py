@@ -61,6 +61,8 @@ def order_text(o: dict) -> str:
     spec = o["spec"]
     if o.get("kind") == "tg_ads":
         return tga_order_text(o)
+    if o.get("kind") == "tg_post":
+        return tgp_order_text(o)
     tl = []
     if o.get("submitted_at"):
         tl.append(f"أُرسل للتنفيذ: {ON._when(o['submitted_at'])}")
@@ -99,6 +101,46 @@ def tga_order_text(o: dict) -> str:
     )
 
 
+def tgp_order_text(o: dict) -> str:
+    from app.services import partner_posts as PP
+    spec = o["spec"]
+    if spec.get("text"):
+        content = f"نص {len(spec['text'])} حرفاً"
+    elif "copy" in (spec.get("addons") or []):
+        content = "النص يكتبه فريقنا ✍️"
+    else:
+        content = "—"
+    if spec.get("media_n"):
+        content += f" + {spec['media_n']} 📎"
+    if o.get("scheduled_at"):
+        when = f"الموعد المؤكَّد: <b>{ON._when(o['scheduled_at'])}</b>"
+    else:
+        when = "الموعد المطلوب: " + (ON.esc(spec.get("when")) if spec.get("when") else "⚡ أقرب وقت متاح")
+    url = f"\n🔗 {ON.esc(o['post_url'])}" if o.get("post_url") else ""
+    tl = []
+    if o.get("started_at"):
+        tl.append(f"نُشر: {ON._when(o['started_at'])}")
+    if o.get("ends_at") and o["status"] == "active":
+        tl.append(f"ينتهي: {ON._when(o['ends_at'])}")
+    if o.get("completed_at"):
+        tl.append(f"انتهى: {ON._when(o['completed_at'])}")
+    timeline = ("\n🕒 " + " · ".join(tl)) if tl else ""
+    return T.ORDER_VIEW_TGP.format(
+        icon=orders_svc.status_icon(o), id=o["id"], status=orders_svc.status_name(o),
+        title=ON.esc(spec.get("channel_title")), subs=PP.subs_label(spec.get("channel_subs")), format=PP.fmt_label(spec.get("format", "24h")),
+        price=fmt(o["price_usd"]), content=content, when=when, url=url, created=ON._when(o.get("created_at")),
+        timeline=timeline, views=ON.tgp_views_line(o), hint=T.TGP_HINTS.get(o["status"], T.ORDER_HINTS.get(o["status"], "")),
+    )
+
+
+def client_kb(o: dict):
+    if o.get("kind") == "tg_post":
+        return K.tgp_order_view(o)
+    if o.get("kind") == "tg_ads" and o["status"] == "needs_revision":
+        return K.tga_revision(o["id"])
+    return K.order_view(o)
+
+
 @router.callback_query(F.data.startswith("ord:view:"))
 async def cb_view(cb: CallbackQuery, state: FSMContext) -> None:
     oid = int(cb.data.split(":")[2])
@@ -109,7 +151,7 @@ async def cb_view(cb: CallbackQuery, state: FSMContext) -> None:
     await state.clear()
     o["media_count"] = len(await repo.media(oid))
     text = order_text(o)
-    kb = K.tga_revision(oid) if (o.get("kind") == "tg_ads" and o["status"] == "needs_revision") else K.order_view(o)
+    kb = client_kb(o)
     try:
         await cb.message.edit_text(text, reply_markup=kb)
     except Exception:  # noqa: BLE001
@@ -178,6 +220,10 @@ async def cb_renew(cb: CallbackQuery, state: FSMContext) -> None:
         from app.bot.handlers.tg_ads_wizard import renew_from
         await renew_from(cb, state, o)
         await cb.answer("🔁 نفس الإعدادات — راجع وأكّد")
+        return
+    if o.get("kind") == "tg_post":
+        from app.bot.handlers.tg_post_wizard import cb_start
+        await cb_start(cb, state)
         return
     from app.bot.handlers.meta_wizard import _show_summary
     from app.services import validators as V

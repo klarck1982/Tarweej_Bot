@@ -53,13 +53,26 @@ TG_ADS_STATUS_NAME = {
 }
 KIND_NAME = {"meta_campaign": "إعلان فيسبوك/إنستغرام", "tg_ads": "إعلان Telegram Ads", "tg_post": "نشر في قناة شريكة"}
 KIND_EMOJI = {"meta_campaign": "📢", "tg_ads": "📣", "tg_post": "📝"}
+# القنوات الشريكة: submitted 🟡 جديد · in_progress 📅 مجدول · active 🟢 منشور · completed ✅ انتهى
+TG_POST_STATUS_NAME = {
+    "submitted": "جديد — بانتظار تأكيد الموعد", "in_progress": "مجدول", "active": "منشور الآن",
+    "completed": "انتهى", "rejected": "تعذّر النشر — مُسترد", "cancelled": "ألغيته — مُسترد",
+}
 
 
 def status_name(order: dict) -> str:
     st = order["status"]
     if order.get("kind") == "tg_ads":
         return TG_ADS_STATUS_NAME.get(st, STATUS_NAME.get(st, st))
+    if order.get("kind") == "tg_post":
+        return TG_POST_STATUS_NAME.get(st, STATUS_NAME.get(st, st))
     return STATUS_NAME.get(st, st)
+
+
+def status_icon(order: dict) -> str:
+    if order.get("kind") == "tg_post" and order["status"] == "in_progress":
+        return "📅"
+    return STATUS_ICON.get(order["status"], "•")
 
 
 def status_label(status: str) -> str:
@@ -72,6 +85,9 @@ def compute_prices(spec: dict) -> tuple[Decimal, Decimal, Decimal]:
     """يعيد (الميزانية، سعر العميل، تكلفتنا) من spec — بما فيها الإضافات (نص إعلاني)."""
     if spec.get("kind") == "tg_ads":
         return P.tg_ads_quote(spec["budget"], copy_addon="copy" in (spec.get("addons") or []))
+    if spec.get("kind") == "tg_post":
+        from app.services import partner_posts
+        return partner_posts.compute_prices(spec)
     daily = Decimal(str(spec["daily"]))
     days = int(spec["days"])
     budget, price, cost = P.meta_custom_price(daily, days)
@@ -303,7 +319,7 @@ async def manual_transition(order_id: int, to: str, admin_id: int, note: str | N
                             results: dict | None = None) -> tuple[dict | None, bool]:
     """ينقل طلباً يدوياً إلى حالة جديدة. الرفض = استرداد كامل تلقائي. يعيد (الطلب، هل تغيّر؟)."""
     order = await repo.get(order_id)
-    if not order or to not in MANUAL_TRANSITIONS.get(order["status"], ()):
+    if not order or order.get("kind") == "tg_post" or to not in MANUAL_TRANSITIONS.get(order["status"], ()):
         return order, False
     now = datetime.now(timezone.utc)
     if to == "rejected":

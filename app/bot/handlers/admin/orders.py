@@ -29,6 +29,11 @@ class AdminOrder(StatesGroup):
     tga_reject = State()
     tga_results = State()
     tga_text = State()
+    tgp_when = State()
+    tgp_url = State()
+    tgp_views = State()
+    tgp_reject = State()
+    tgp_text = State()
 
 
 async def _list_view() -> tuple[str, object]:
@@ -324,6 +329,182 @@ async def msg_tga_text(message: Message, state: FSMContext) -> None:
     try:
         await message.bot.send_message(o["user_id"], T.TGA_TEXT_BY_TEAM.format(id=o["id"], text=T.esc(txt)),
                                        reply_markup=K.order_view({**o, "media_count": 0}))
+    except Exception:  # noqa: BLE001
+        pass
+    await ON.refresh_admin_cards(message.bot, o["id"])
+
+
+# ───────────── 📝 القنوات الشريكة: بطاقة طلب النشر ─────────────
+
+import re  # noqa: E402
+from zoneinfo import ZoneInfo  # noqa: E402
+
+from app.services import partner_posts as PP  # noqa: E402
+
+_POST_URL_RE = re.compile(r"^(?:https?://)?(?:t\.me|telegram\.me)/(?:c/\d+|[A-Za-z][A-Za-z0-9_]{3,31})/\d+(?:\?.*)?$", re.I)
+
+
+async def _tgp_order(cb: CallbackQuery, oid: int, statuses: tuple[str, ...]) -> dict | None:
+    o = await repo.get(oid)
+    if not o or o.get("kind") != "tg_post":
+        await cb.answer()
+        return None
+    if o["status"] not in statuses:
+        await cb.answer("هذا الإجراء غير متاح من الحالة الحالية", show_alert=True)
+        await ON.refresh_admin_cards(cb.bot, oid)
+        return None
+    return o
+
+
+@router.callback_query(F.data.regexp(r"^adm:tgp:(\d+):when$"))
+async def cb_tgp_when(cb: CallbackQuery, state: FSMContext) -> None:
+    oid = int(cb.data.split(":")[2])
+    if await _tgp_order(cb, oid, ("submitted", "in_progress")):
+        await C.ask_input(cb, state, AdminOrder.tgp_when, {"oid": oid}, T.ADMIN_TGP_ASK_WHEN.format(id=oid, tz=settings.tz),
+                          K.cancel_input("adm:cancel_input"))
+
+
+@router.message(AdminOrder.tgp_when, F.text)
+async def msg_tgp_when(message: Message, state: FSMContext) -> None:
+    if message.text.startswith("/") or message.text in T.MAIN_BUTTONS:
+        await state.clear()
+        return
+    when = PP.parse_when(message.text, ZoneInfo(settings.tz))
+    if not when:
+        await message.answer(T.ADMIN_TGP_WHEN_INVALID)
+        return
+    data = await state.get_data()
+    await state.clear()
+    o = await PP.schedule(data["oid"], message.from_user.id, when)
+    if not o:
+        await message.answer("لم يُنفَّذ — الطلب تغيّرت حالته.")
+        return
+    await message.answer(f"📅 #ORD-{o['id']} مجدول: <b>{ON._when(when)}</b> — أُبلغ العميل.")
+    await ON.push_user_status(message.bot, o)
+    await ON.refresh_admin_cards(message.bot, o["id"])
+
+
+@router.callback_query(F.data.regexp(r"^adm:tgp:(\d+):url$"))
+async def cb_tgp_url(cb: CallbackQuery, state: FSMContext) -> None:
+    oid = int(cb.data.split(":")[2])
+    if await _tgp_order(cb, oid, ("submitted", "in_progress")):
+        await C.ask_input(cb, state, AdminOrder.tgp_url, {"oid": oid}, T.ADMIN_TGP_ASK_URL.format(id=oid), K.cancel_input("adm:cancel_input"))
+
+
+@router.message(AdminOrder.tgp_url, F.text)
+async def msg_tgp_url(message: Message, state: FSMContext) -> None:
+    if message.text.startswith("/") or message.text in T.MAIN_BUTTONS:
+        await state.clear()
+        return
+    raw = message.text.strip()
+    if not _POST_URL_RE.match(raw):
+        await message.answer(T.ADMIN_TGP_URL_INVALID)
+        return
+    url = raw if raw.startswith("http") else "https://" + raw
+    data = await state.get_data()
+    await state.clear()
+    o = await PP.publish(data["oid"], message.from_user.id, url)
+    if not o:
+        await message.answer("لم يُنفَّذ — الطلب تغيّرت حالته.")
+        return
+    await message.answer(f"🟢 #ORD-{o['id']} منشور — ينتهي تلقائياً {ON._when(o['ends_at'])}. أُبلغ العميل بالرابط.")
+    await ON.push_user_status(message.bot, o)
+    await ON.refresh_admin_cards(message.bot, o["id"])
+
+
+@router.callback_query(F.data.regexp(r"^adm:tgp:(\d+):views$"))
+async def cb_tgp_views(cb: CallbackQuery, state: FSMContext) -> None:
+    oid = int(cb.data.split(":")[2])
+    if await _tgp_order(cb, oid, ("active", "completed")):
+        await C.ask_input(cb, state, AdminOrder.tgp_views, {"oid": oid}, T.ADMIN_TGP_ASK_VIEWS.format(id=oid), K.cancel_input("adm:cancel_input"))
+
+
+@router.message(AdminOrder.tgp_views, F.text)
+async def msg_tgp_views(message: Message, state: FSMContext) -> None:
+    if message.text.startswith("/") or message.text in T.MAIN_BUTTONS:
+        await state.clear()
+        return
+    n = V.parse_int(message.text.replace(",", "").replace("،", "").strip())
+    if n is None or n < 0:
+        await message.answer("اكتب رقماً صحيحاً — مثال <code>8400</code>")
+        return
+    data = await state.get_data()
+    await state.clear()
+    o = await PP.set_views(data["oid"], message.from_user.id, n)
+    if not o:
+        await message.answer("لم يُنفَّذ — الطلب تغيّرت حالته.")
+        return
+    await message.answer(f"👁️ حُفظت المشاهدات لـ #ORD-{o['id']}: <b>{n:,}</b>" + (" — تصل العميل مع إشعار الانتهاء." if o["status"] == "active" else "."))
+    await ON.refresh_admin_cards(message.bot, o["id"])
+
+
+@router.callback_query(F.data.regexp(r"^adm:tgp:(\d+):finish$"))
+async def cb_tgp_finish(cb: CallbackQuery) -> None:
+    oid = int(cb.data.split(":")[2])
+    if not await _tgp_order(cb, oid, ("active",)):
+        return
+    o = await PP.finish(oid, cb.from_user.id)
+    if not o:
+        await cb.answer("لم يُنفَّذ — الطلب تغيّرت حالته.", show_alert=True)
+        return
+    await cb.answer("✅ انتهى — أُبلغ العميل")
+    await ON.push_user_status(cb.bot, o)
+    await ON.refresh_admin_cards(cb.bot, oid)
+
+
+@router.callback_query(F.data.regexp(r"^adm:tgp:(\d+):reject$"))
+async def cb_tgp_reject(cb: CallbackQuery, state: FSMContext) -> None:
+    oid = int(cb.data.split(":")[2])
+    if await _tgp_order(cb, oid, ("submitted", "in_progress", "active")):
+        await C.ask_input(cb, state, AdminOrder.tgp_reject, {"oid": oid}, T.ADMIN_TGP_ASK_REJECT.format(id=oid), K.cancel_input("adm:cancel_input"))
+
+
+@router.message(AdminOrder.tgp_reject, F.text)
+async def msg_tgp_reject(message: Message, state: FSMContext) -> None:
+    if message.text.startswith("/") or message.text in T.MAIN_BUTTONS:
+        await state.clear()
+        return
+    data = await state.get_data()
+    await state.clear()
+    reason = message.text.strip()[:300]
+    o = await PP.reject(data["oid"], message.from_user.id, reason)
+    if not o:
+        await message.answer("لم يُنفَّذ — الطلب تغيّرت حالته.")
+        return
+    await message.answer(f"❌ #ORD-{o['id']} — استُرد {fmt(o['refunded_usd'])} للعميل وأُبلغ.")
+    await ON.push_user_status(message.bot, o, reason=reason)
+    await ON.refresh_admin_cards(message.bot, o["id"])
+
+
+@router.callback_query(F.data.regexp(r"^adm:tgp:(\d+):text$"))
+async def cb_tgp_text(cb: CallbackQuery, state: FSMContext) -> None:
+    oid = int(cb.data.split(":")[2])
+    if await _tgp_order(cb, oid, ("submitted", "in_progress")):
+        await C.ask_input(cb, state, AdminOrder.tgp_text, {"oid": oid},
+                          f"✍️ اكتب نص المنشور الذي صغته للعميل #ORD-{oid} (حتى 1000 حرف) — سيُحفظ في الطلب ويصل العميل للاطلاع:",
+                          K.cancel_input("adm:cancel_input"))
+
+
+@router.message(AdminOrder.tgp_text, F.text)
+async def msg_tgp_text(message: Message, state: FSMContext) -> None:
+    if message.text.startswith("/") or message.text in T.MAIN_BUTTONS:
+        await state.clear()
+        return
+    txt = message.text.strip()
+    if not 5 <= len(txt) <= 1000:
+        await message.answer(T.TGP_TEXT_TOO_LONG.format(n=len(txt)) if len(txt) > 1000 else "النص قصير جداً.")
+        return
+    data = await state.get_data()
+    await state.clear()
+    o = await repo.get(data["oid"])
+    if not o:
+        return
+    o = await repo.update(o["id"], spec={**o["spec"], "text": txt, "text_by_team": True})
+    await events.log_event("tgp_text_by_team", message.from_user.id, o["id"])
+    await message.answer(f"✅ حُفظ النص لطلب #ORD-{o['id']} ({len(txt)} حرفاً) — أُبلغ العميل.")
+    try:
+        await message.bot.send_message(o["user_id"], f"✍️ <b>#ORD-{o['id']}: جهّز فريقنا نص منشورك:</b>\n<code>{T.esc(txt)}</code>\n\nسيُنشر به في موعده. إذا أردت تعديلاً بسيطاً راسلنا من «مساعدة بهذا الطلب» قبل النشر.",
+                                       reply_markup=K.tgp_order_view({**o, "media_count": 0}))
     except Exception:  # noqa: BLE001
         pass
     await ON.refresh_admin_cards(message.bot, o["id"])

@@ -74,25 +74,27 @@ async def cb_meta_diff(cb: CallbackQuery) -> None:
 
 # ───────────── ✈️ تيليغرام ─────────────
 
+async def _tg_screen() -> tuple[str, object]:
+    """T0: الزر الشريك يُفتح تلقائياً عندما توجد قناة حيّة واحدة على الأقل."""
+    from app.db.repo import partner_channels as PC
+    svc = await settings_repo.services()
+    n = await PC.count_live() if svc.get("tg_post", True) else 0
+    tgp_min = await _tgp_min_client() if n else None
+    return T.tg_intro(tgp_min), K.tg_tracks(svc["tg_ads"], svc["tg_post"], n)
+
+
 @router.message(F.text == T.BTN_TG)
 async def m_tg(message: Message, state: FSMContext) -> None:
     await _guard_wizard(message, state)
-    svc = await settings_repo.services()
-    await message.answer(T.tg_intro(), reply_markup=K.tg_tracks(svc["tg_ads"], svc["tg_post"]))
+    text, kb = await _tg_screen()
+    await message.answer(text, reply_markup=kb)
 
 
 @router.callback_query(F.data == "nav:tg")
 async def cb_nav_tg(cb: CallbackQuery, state: FSMContext) -> None:
     await state.clear()
-    svc = await settings_repo.services()
-    await _show(cb, T.tg_intro(), K.tg_tracks(svc["tg_ads"], svc["tg_post"]))
-
-
-@router.callback_query(F.data == "tgp:start")
-async def cb_tg_post_start(cb: CallbackQuery) -> None:
-    """القنوات الشريكة — تُبنى في التسليم التالي؛ الزر مقفول حتى تُضاف أول قناة."""
-    await events.log_event("tg_track_click", cb.from_user.id, track="tg_post")
-    await cb.answer(T.TGP_SOON, show_alert=True)
+    text, kb = await _tg_screen()
+    await _show(cb, text, kb)
 
 
 # ───────────── 🎨 تصميم ─────────────
@@ -189,9 +191,20 @@ async def cb_info(cb: CallbackQuery, state: FSMContext) -> None:
     await cb.answer()
 
 
+async def _tgp_min_client():
+    """أرخص منشور 24 ساعة (سعر العميل) — None إن لم توجد قنوات حيّة أو الخدمة متوقفة."""
+    from app.db.repo import partner_channels as PC
+    from app.services import pricing as P
+    svc = await settings_repo.services()
+    if not svc.get("tg_post", True):
+        return None
+    m = await PC.min_live_price_24h()
+    return P.money(m * P.TG_POST_MULT) if m is not None else None
+
+
 @router.callback_query(F.data == "info:ads")
 async def cb_info_ads(cb: CallbackQuery) -> None:
-    await cb.message.edit_text(T.prices_ads(), reply_markup=K.info_back())
+    await cb.message.edit_text(T.prices_ads(await _tgp_min_client()), reply_markup=K.info_back())
     await cb.answer()
 
 

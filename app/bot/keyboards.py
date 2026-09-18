@@ -132,10 +132,16 @@ def meta_diff_back() -> InlineKeyboardMarkup:
 
 # ───────────── T0 تيليغرام ─────────────
 
-def tg_tracks(ads_on: bool = True, post_on: bool = True) -> InlineKeyboardMarkup:
+def tg_tracks(ads_on: bool = True, post_on: bool = True, channels_n: int = 0) -> InlineKeyboardMarkup:
+    """المسار الشريك يُفتح عندما توجد قناة حيّة واحدة على الأقل والخدمة مفعّلة — وإلا يبقى «قريباً 🔒»."""
+    post_live = post_on and channels_n > 0
+    if post_live:
+        post_btn = ib(f"📝 نشر في قنوات شريكة · {channels_n} {'قناة' if channels_n < 11 else 'قناة'}", "tgp:start", "success")
+    else:
+        post_btn = ib("📝 نشر في قنوات شريكة — قريباً 🔒", "tgp:start")
     return InlineKeyboardMarkup(inline_keyboard=[
         [ib("📣 إعلان Telegram Ads الرسمي" + ("" if ads_on else " 🔒"), "tga:start", "primary" if ads_on else None)],
-        [ib("📝 نشر في قنوات شريكة — قريباً 🔒", "tgp:start")],
+        [post_btn],
         [ib("🏠 القائمة", "nav:home")],
     ])
 
@@ -790,6 +796,155 @@ def admin_tga_card(order: dict, in_channel: bool = False) -> InlineKeyboardMarku
     rows.append([ib("💬 مراسلة العميل", f"adm:ord:{oid}:msg")])
     if st in ("submitted", "in_progress", "needs_revision", "active", "paused"):
         rows.append([ib("↩️ استرداد كامل وإغلاق", f"adm:ord:{oid}:refund", "danger")])
+    if not in_channel:
+        rows.append([ib("◀️ الطلبات", "adm:orders")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+# ═══════════════════════════ 📝 القنوات الشريكة — المعالج ═══════════════════════════
+
+def _tgp_nav(back: str | None = None) -> list[list[InlineKeyboardButton]]:
+    return _nav(back, cancel="tgp:cancel")
+
+
+def tgp_categories(cats: list[tuple[str, int]], total: int) -> InlineKeyboardMarkup:
+    from app.db.repo import partner_channels as PC
+    rows = [[ib(f"{PC.cat_label(c)} · {n}", f"tgp:cat:{c}")] for c, n in cats]
+    if len(cats) > 1:
+        rows.append([ib(f"📋 كل القنوات · {total}", "tgp:cat:all", "primary")])
+    rows += _tgp_nav("nav:tg")
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def tgp_channels(items: list[tuple[int, str]], cat: str, page: int, pages: int) -> InlineKeyboardMarkup:
+    b = InlineKeyboardBuilder()
+    for cid, label in items:
+        b.row(ib(label, f"tgp:ch:{cid}"))
+    if pages > 1:
+        nav = []
+        if page > 1:
+            nav.append(ib("◀️", f"tgp:cat:{cat}:{page - 1}"))
+        nav.append(ib(f"{page} / {pages}", "nav:noop"))
+        if page < pages:
+            nav.append(ib("▶️", f"tgp:cat:{cat}:{page + 1}"))
+        b.row(*nav)
+    for r in _tgp_nav("tgp:back:cats"):
+        b.row(*r)
+    return b.as_markup()
+
+
+def tgp_channel_card(cid: int, url: str, back_cat: str) -> InlineKeyboardMarkup:
+    rows = []
+    if url and url.startswith("https://"):
+        rows.append([url_btn("👁️ عرض القناة ↗", url)])
+    rows.append([ib("✅ اختيار هذه القناة", f"tgp:pick:{cid}", "success")])
+    rows += _tgp_nav(f"tgp:cat:{back_cat}")
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def tgp_formats(formats: list[tuple[str, str]], back_cid: int) -> InlineKeyboardMarkup:
+    """formats = [(code, label_with_price)]"""
+    rows = [[ib(label, f"tgp:fmt:{code}", "primary" if i == 0 else None)] for i, (code, label) in enumerate(formats)]
+    rows += _tgp_nav(f"tgp:ch:{back_cid}")
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def tgp_content(copy_price: str, has_copy: bool) -> InlineKeyboardMarkup:
+    rows = []
+    if not has_copy:
+        rows.append([ib(f"✍️ اكتبولي النص (+{copy_price})", "tgp:addon:copy", "success")])
+    rows += _tgp_nav("tgp:back:fmt")
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def tgp_content_next(can_next: bool) -> InlineKeyboardMarkup:
+    rows = []
+    if can_next:
+        rows.append([ib("✅ تم — التالي", "tgp:content:next", "success")])
+    rows.append([ib("🗑️ ابدأ المحتوى من جديد", "tgp:content:reset")])
+    rows += _tgp_nav("tgp:back:fmt")
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def tgp_when() -> InlineKeyboardMarkup:
+    rows = [[ib("⚡ أقرب وقت متاح", "tgp:when:asap", "primary")],
+            [ib("📅 وقت محدد ✍️", "tgp:when:type")]]
+    rows += _tgp_nav("tgp:back:content")
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def tgp_summary(price_ok: bool, price: str, gap: str | None = None) -> InlineKeyboardMarkup:
+    rows = []
+    if price_ok:
+        rows.append([ib(f"✅ تأكيد ودفع {price}", "tgp:confirm", "success")])
+    else:
+        rows.append([ib(f"➕ اشحن {gap} وأكمل", "meta:topup_gap", "success")])
+    rows.append([ib("✏️ تعديل خطوة", "tgp:edit")])
+    rows.append([ib("❌ إلغاء", "tgp:cancel", "danger")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def tgp_edit_menu() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [ib("📢 القناة", "tgp:back:cats"), ib("🕐 الصيغة", "tgp:back:fmt")],
+        [ib("✍️ المحتوى", "tgp:back:content"), ib("📅 الموعد", "tgp:back:when")],
+        [ib("◀️ رجوع للملخص", "tgp:back:summary")],
+    ])
+
+
+def tgp_done(order_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [ib("📦 متابعة الطلب", f"ord:view:{order_id}", "primary")],
+        [ib("🏠 القائمة", "nav:home")],
+    ])
+
+
+def tgp_order_view(order: dict) -> InlineKeyboardMarkup:
+    """بطاقة طلب النشر عند العميل — تختلف عن order_view بزر فتح المنشور والإلغاء المجاني."""
+    st = order["status"]
+    oid = order["id"]
+    rows = []
+    if st == "awaiting_payment":
+        rows.append([ib("📦 أكمل الطلب", "ord:resume", "success")])
+        rows.append([ib("🗑️ إلغاء المسودة", f"ord:draft_cancel:{oid}", "danger")])
+    if order.get("post_url"):
+        rows.append([url_btn("🔗 فتح المنشور ↗", order["post_url"])])
+    if st == "submitted":
+        rows.append([ib("🚫 إلغاء واسترداد (مجاني قبل الجدولة)", f"tgp:cancel_order:{oid}", "danger")])
+    if st in ("completed", "rejected", "cancelled", "refunded"):
+        rows.append([ib("🔁 كرّر في قناة أخرى", "tgp:start", "primary")])
+    if order.get("media_count"):
+        rows.append([ib("🖼️ عرض ملفاتي", f"ord:media:{oid}")])
+    rows.append([ib("💬 مساعدة بهذا الطلب", f"ord:help:{oid}")])
+    rows.append([ib("◀️ طلباتي", "ord:list:1"), ib("🏠 القائمة", "nav:home")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def tgp_cancel_confirm(order_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [ib("✅ نعم، ألغِ واسترد", f"tgp:cancel_yes:{order_id}", "danger")],
+        [ib("◀️ رجوع", f"ord:view:{order_id}")],
+    ])
+
+
+def admin_tgp_card(order: dict, media_count: int = 0, in_channel: bool = False) -> InlineKeyboardMarkup:
+    oid, st = order["id"], order["status"]
+    spec = order.get("spec") or {}
+    rows = []
+    if st in ("submitted", "in_progress") and "copy" in (spec.get("addons") or []) and not spec.get("text"):
+        rows.append([ib("✍️ أدخل النص الذي كتبته", f"adm:tgp:{oid}:text", "success")])
+    if st in ("submitted", "in_progress"):
+        rows.append([ib("📅 تأكيد الموعد ✍️" if st == "submitted" else "📅 تغيير الموعد ✍️", f"adm:tgp:{oid}:when", "primary")])
+        rows.append([ib("🔗 تم النشر — ألصق الرابط ✍️", f"adm:tgp:{oid}:url", "success")])
+    if st == "active":
+        rows.append([ib("👁️ إدخال المشاهدات ✍️", f"adm:tgp:{oid}:views"), ib("✅ إنهاء الآن", f"adm:tgp:{oid}:finish", "success")])
+    if st == "completed":
+        rows.append([ib("👁️ تعديل المشاهدات ✍️", f"adm:tgp:{oid}:views")])
+    if media_count:
+        rows.append([ib(f"📎 ملفات العميل ({media_count})", f"adm:ord:{oid}:media")])
+    rows.append([ib("💬 مراسلة العميل", f"adm:ord:{oid}:msg")])
+    if st in ("submitted", "in_progress", "active"):
+        rows.append([ib("❌ تعذّر النشر — استرداد كامل", f"adm:tgp:{oid}:reject", "danger")])
     if not in_channel:
         rows.append([ib("◀️ الطلبات", "adm:orders")])
     return InlineKeyboardMarkup(inline_keyboard=rows)

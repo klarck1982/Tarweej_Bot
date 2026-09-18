@@ -249,11 +249,21 @@ SERVICE_NAMES = {"meta": "📢 إعلانات فيسبوك / إنستغرام", 
 SERVICE_LOCKED = {"tg_post": "يُفتح تلقائياً عند إضافة أول قناة شريكة", "ai_reel": "مقفول — يُفعَّل لاحقاً"}
 
 
+async def service_locks() -> dict[str, str]:
+    """الأقفال الفعلية الآن: القنوات الشريكة تُفتح عندما توجد قناة حيّة واحدة على الأقل."""
+    from app.db.repo import partner_channels as PC
+    locks = dict(SERVICE_LOCKED)
+    if await PC.count_live() > 0:
+        locks.pop("tg_post", None)
+    return locks
+
+
 async def save_services(raw: dict, admin_id: int) -> list[str]:
     svc = await settings_repo.services()
+    locks = await service_locks()
     changed = []
     for k in svc:
-        if k in SERVICE_LOCKED or k not in raw:
+        if k in locks or k not in raw:
             continue
         v = bool(raw[k])
         if svc[k] != v:
@@ -310,6 +320,7 @@ async def stats(period: str = "7d") -> dict:
     pending_topups = await db.fetchval("SELECT count(*) FROM topups WHERE status='pending'") or 0
     new_orders = by_status.get("submitted", 0) + by_status.get("paid", 0)
     awaiting_text = by_status.get("needs_revision", 0)
+    posts_waiting = await db.fetchval("SELECT count(*) FROM orders WHERE kind = 'tg_post' AND status IN ('submitted','in_progress')") or 0
     liabilities = await db.fetchval("SELECT coalesce(sum(balance_usd),0) FROM users") or 0
     topups_period = await db.fetchval("SELECT coalesce(sum(amount_usd),0) FROM topups WHERE status='approved' AND decided_at >= $1", since) or 0
     # الإيراد اليومي لآخر 7 أيام (للرسم)
@@ -337,7 +348,7 @@ async def stats(period: str = "7d") -> dict:
         "orders": row["n"], "orders_open": open_n, "revenue": float(revenue), "cost": float(cost),
         "profit": float(revenue - cost), "margin_pct": (int((revenue - cost) / revenue * 100) if revenue else 0),
         "growth_pct": growth, "by_status": by_status, "pending_topups": pending_topups, "new_orders": new_orders,
-        "awaiting_text": awaiting_text, "liabilities": float(liabilities), "topups_period": float(topups_period),
+        "awaiting_text": awaiting_text, "posts_waiting": posts_waiting, "liabilities": float(liabilities), "topups_period": float(topups_period),
         "chart": chart, "top_services": top_services, "nour_balance": nour_balance,
         "nour_dry": _nour_dry(),
     }
@@ -360,6 +371,59 @@ def _service_label(kind: str, pkg: str) -> str:
     return names.get(kind, kind)
 
 
+# ═══════════════════════════ القنوات الشريكة ═══════════════════════════
+
+async def partner_channels_view() -> dict:
+    from app.db.repo import partner_channels as PC
+    from app.services import partner_posts as PP
+    items = [PP.channel_view(c) for c in await PC.list_all()]
+    return {"items": items, "categories": {k: f"{e} {n}" for k, (e, n) in PC.CATEGORIES.items()},
+            "live": sum(1 for c in items if c["enabled"] and not c["archived"]), "month": await PC.month_stats(),
+            "mult": str(P.TG_POST_MULT), "pin_extra": str(P.TG_POST_PIN_EXTRA)}
+
+
+async def save_partner_channel(raw: dict, admin_id: int) -> dict:
+    """إنشاء/تعديل قناة من Cpanel. يعيد القناة المحفوظة (يرمي ValueError عند خطأ إدخال)."""
+    from app.db.repo import partner_channels as PC
+    from app.services import partner_posts as PP
+    data = PP.validate_channel(raw)
+    cid = raw.get("id")
+    if cid:
+        before = await PC.get(int(cid))
+        if not before:
+            raise ValueError("القناة غير موجودة")
+        ch = await PC.update(int(cid), data)
+        for k, v in data.items():
+            if str(before.get(k)) != str(v):
+                await audit(admin_id, "channels", f"{ch['title']}.{k}", before.get(k), v)
+    else:
+        ch = await PC.create(data)
+        await audit(admin_id, "channels", "add", None, f"{ch['title']} · {ch['price_24h']}$")
+    return PP.channel_view(ch)
+
+
+async def toggle_partner_channel(channel_id: int, enabled: bool, admin_id: int) -> dict | None:
+    from app.db.repo import partner_channels as PC
+    from app.services import partner_posts as PP
+    ch = await PC.get(channel_id)
+    if not ch:
+        return None
+    if ch["enabled"] != enabled:
+        ch = await PC.update(channel_id, {"enabled": enabled})
+        await audit(admin_id, "channels", f"{ch['title']}.enabled", not enabled, enabled)
+    return PP.channel_view(ch)
+
+
+async def delete_partner_channel(channel_id: int, admin_id: int) -> str:
+    from app.db.repo import partner_channels as PC
+    ch = await PC.get(channel_id)
+    if not ch:
+        return "missing"
+    res = await PC.delete_or_archive(channel_id)
+    await audit(admin_id, "channels", f"{ch['title']}.{res}", True, False)
+    return res
+
+
 async def channels_view() -> list[dict]:
     from app.services import channels as CH
     cfg = await CH.all_cfg()
@@ -379,6 +443,6 @@ async def snapshot() -> dict:
         "pricing": P.current(), "pricing_defaults": P.DEFAULTS,
         "general": await general(), "general_env": {"support_username": settings.support_username, "updates_channel": settings.updates_channel},
         "payments": await PM.get_methods(), "payment_order": PM.METHOD_ORDER, "syp_rate": str(await PM.syp_rate()),
-        "services": await settings_repo.services(), "service_names": SERVICE_NAMES, "service_locked": SERVICE_LOCKED,
-        "channels": await channels_view(), "audit": await audit_log(30),
+        "services": await settings_repo.services(), "service_names": SERVICE_NAMES, "service_locked": await service_locks(),
+        "channels": await channels_view(), "partner": await partner_channels_view(), "audit": await audit_log(30),
     }

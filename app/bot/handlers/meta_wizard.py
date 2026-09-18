@@ -688,6 +688,11 @@ async def cb_resume(cb: CallbackQuery, state: FSMContext) -> None:
         await resume_draft(cb, state, draft)
         await cb.answer()
         return
+    if draft.get("kind") == "tg_post":
+        from app.bot.handlers.tg_post_wizard import resume_draft as resume_post
+        await resume_post(cb, state, draft)
+        await cb.answer()
+        return
     await state.clear()
     await state.update_data(
         pkg=spec.get("pkg"), daily=spec["daily"], days=int(spec["days"]), platform=spec["platform"], goal=spec.get("goal"),

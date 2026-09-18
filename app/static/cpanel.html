@@ -98,6 +98,24 @@ textarea{min-height:60px;resize:vertical}
 .toast.err{background:var(--bad);color:#fff}
 .radio{display:flex;gap:6px}.radio .chip.on{background:var(--b2);color:#fff;border-color:transparent}
 .small{font-size:12px;color:var(--hint)}
+/* partner channels */
+.pc{display:flex;align-items:flex-start;gap:10px;padding:10px 0;border-bottom:1px solid var(--line)}
+.pc:last-child{border-bottom:0}
+.pc .ico{width:36px;height:36px;border-radius:10px;display:grid;place-items:center;font-size:18px;background:var(--input);flex:none}
+.pc .t{flex:1;min-width:0}.pc .t b{display:block}.pc .t span{font-size:11px;color:var(--hint);display:block}
+.pc .t .q{color:var(--tx)}.pc .t .q b{display:inline;color:var(--b2)}
+.pc .acts{display:flex;gap:4px;margin-top:6px}
+.pc .acts button{font:inherit;font-size:11px;background:var(--input);border:1px solid var(--line);border-radius:7px;padding:2px 8px;color:var(--tx);cursor:pointer}
+.pc.off{opacity:.55}
+.pc .stat{background:rgba(255,159,10,.08)}
+.subpage{position:fixed;inset:0;background:var(--bg);z-index:20;overflow-y:auto;padding-bottom:calc(90px + env(safe-area-inset-bottom))}
+.subpage .hero{padding-top:12px}
+.subhead{display:flex;align-items:center;gap:10px}
+.subhead button{background:rgba(255,255,255,.18);border:0;color:#fff;border-radius:9px;padding:4px 10px;font:inherit;font-weight:800;cursor:pointer}
+.row.hl{background:rgba(255,159,10,.08);margin:0 -12px;padding:9px 12px}
+.link{color:var(--b2);font-weight:700;cursor:pointer}
+.formbar{position:fixed;left:0;right:0;bottom:0;display:flex;gap:8px;padding:10px 12px calc(12px + env(safe-area-inset-bottom));background:var(--card);border-top:1px solid var(--line);z-index:25}
+.formbar .btn{flex:1}
 .center{text-align:center}
 .empty{color:var(--hint);text-align:center;padding:14px 0;font-size:12.5px}
 .warnbox{background:rgba(255,159,10,.12);border:1px solid rgba(255,159,10,.5);border-radius:10px;padding:8px 10px;font-size:12px;margin:8px 0}
@@ -139,6 +157,7 @@ textarea{min-height:60px;resize:vertical}
       <div class="ctitle">🔔 بانتظارك</div>
       <div class="row"><span>📥 شحن معلّق</span><span class="n" id="w-topups">0</span></div>
       <div class="row"><span>🟡 طلبات جديدة</span><span class="n" id="w-new">0</span></div>
+      <div class="row" id="w-posts-row"><span>📝 منشورات بانتظار الموعد / النشر</span><span class="n" id="w-posts">0</span></div>
       <div class="row"><span>✏️ بانتظار نص العميل</span><span class="n" id="w-text">0</span></div>
       <div class="small" style="padding:6px 0 10px">تُعالج من بطاقاتها في البوت أو قناة الطلبات — إدارتها من هنا في النسخة القادمة.</div>
     </div>
@@ -228,6 +247,10 @@ textarea{min-height:60px;resize:vertical}
   <section id="tab-services" class="hidden">
     <div class="hero"><div class="ht">🧩 الخدمات</div><div class="hs">أزرار القائمة الرئيسية — تشغيل/إيقاف بلحظة</div></div>
     <div class="card" id="services"></div>
+    <div class="sec">📡 القنوات الشريكة</div>
+    <div class="card">
+      <div class="row"><div class="lbl"><b id="pc-summary">—</b><span class="h" id="pc-summary-h">أضف أول قناة ليُفتح زر «📝 نشر في قنوات» للعملاء تلقائياً</span></div><button class="btn g sm" onclick="openPartner()">إدارة القنوات ›</button></div>
+    </div>
     <div class="sec">عند إيقاف خدمة</div>
     <div class="card">
       <div class="row"><span>🔒 يبقى الزر ظاهراً بشارة «قريباً»</span><span class="radio"><span class="chip" data-g="disabled_style" data-v="lock">هذا</span></span></div>
@@ -266,6 +289,53 @@ textarea{min-height:60px;resize:vertical}
     <div class="center small" style="padding:14px 0 6px">ترويج بوت · Cpanel <span id="ver2"></span> · Crafted with Arena.ai ✨</div>
     <div style="height:70px"></div>
   </section>
+
+  <!-- ═══ القنوات الشريكة — صفحة القائمة ═══ -->
+  <div class="subpage hidden" id="pc-page">
+    <div class="hero">
+      <div class="subhead"><button onclick="closePartner()">‹ رجوع</button><div><div class="hi">🧩 الخدمات ›</div><div class="ht">📡 القنوات الشريكة</div></div></div>
+      <div class="chips" id="pc-cats"></div>
+    </div>
+    <button class="btn p full" style="margin:10px 12px;width:calc(100% - 24px)" onclick="openPcForm(null)">＋ إضافة قناة</button>
+    <div class="card" id="pc-list"></div>
+    <div class="sec">📈 هذا الشهر</div>
+    <div class="card">
+      <div class="row"><span>منشورات منفَّذة</span><span class="n" id="pc-m-posts">0</span></div>
+      <div class="row"><span>إيراد القنوات</span><span class="n" id="pc-m-rev">0$</span></div>
+      <div class="row"><span>ربح القنوات (بعد دفع أصحابها)</span><span class="n" id="pc-m-profit" style="background:var(--ok);color:#fff">0$</span></div>
+    </div>
+    <div class="small" style="margin:6px 18px 0">سعر العميل = سعر القناة × <b id="pc-mult">1.25</b> (من 💲 الأسعار). المثبَّت بلا سعر خاص = 24 ساعة + <b id="pc-pin">50</b>%. الطلبات المدفوعة تحتفظ بسعرها.</div>
+  </div>
+
+  <!-- ═══ القنوات الشريكة — النموذج ═══ -->
+  <div class="subpage hidden" id="pc-form">
+    <div class="hero"><div class="subhead"><button onclick="closePcForm()">‹ رجوع</button><div><div class="hi">📡 القنوات الشريكة ›</div><div class="ht" id="pc-form-title">إضافة قناة</div></div></div></div>
+    <div class="sec">عن القناة (يراه العميل)</div>
+    <div class="card">
+      <div class="row"><div class="lbl">الاسم</div><input type="text" style="width:170px" data-pc="title" placeholder="سوق الشام"></div>
+      <div class="row"><div class="lbl">الرابط أو المعرّف</div><input type="text" class="mono" style="width:170px" data-pc="url" placeholder="@souq_sham"></div>
+      <div class="row"><div class="lbl">الفئة</div><select data-pc="category" id="pc-cat-sel"></select></div>
+      <div class="row"><div class="lbl">المشتركون<span class="h">تقريبي — يظهر «45 ألف»</span></div><input class="num" type="text" inputmode="numeric" data-pc="subscribers" placeholder="45000"></div>
+      <div class="row"><div class="lbl">متوسط مشاهدات المنشور<span class="h">اختياري</span></div><input class="num" type="text" inputmode="numeric" data-pc="avg_views" placeholder="9000"></div>
+      <div class="row col"><div class="lbl">وصف قصير<span class="h">سطر أو سطران — حتى 200 حرف</span></div><textarea class="wide" data-pc="blurb" style="margin-top:6px;min-height:52px" placeholder="أكبر قناة عروض في دمشق — منشورات يومية وجمهور مهتم بالتسوق."></textarea></div>
+    </div>
+    <div class="sec">💵 أسعار القناة (ما تدفعه أنت لصاحبها)</div>
+    <div class="card">
+      <div class="row"><div class="lbl">منشور 24 ساعة $<span class="h">إلزامي</span></div><input class="num sm" type="text" inputmode="decimal" data-pc="price_24h" placeholder="12"></div>
+      <div class="row"><div class="lbl">منشور 48 ساعة $<span class="h">فارغ = لا تُعرض هذه الصيغة</span></div><input class="num sm" type="text" inputmode="decimal" data-pc="price_48h" placeholder="—"></div>
+      <div class="row"><div class="lbl">📌 مثبَّت 24 ساعة $<span class="h">فارغ = 24 ساعة + الزيادة تلقائياً</span></div><input class="num sm" type="text" inputmode="decimal" data-pc="price_pin" placeholder="—"></div>
+      <div class="row"><div class="lbl">السماح بالتثبيت</div><button class="sw on" data-pc="allow_pin"></button></div>
+      <div class="prev" id="pc-prev">👀 يدفع العميل: —</div>
+    </div>
+    <div class="sec">🔒 خاص بك (لا يراه العميل)</div>
+    <div class="card">
+      <div class="row"><div class="lbl">تواصل صاحب القناة</div><input type="text" class="mono" style="width:160px" data-pc="owner_contact" placeholder="@owner"></div>
+      <div class="row col"><div class="lbl">ملاحظات</div><textarea class="wide" data-pc="notes" style="margin-top:6px;min-height:52px" placeholder="يفضّل النشر بعد 6 مساءً · الدفع USDT بعد النشر"></textarea></div>
+      <div class="row"><div class="lbl">ظاهرة للعملاء</div><button class="sw on" data-pc="enabled"></button></div>
+    </div>
+    <div style="height:80px"></div>
+    <div class="formbar"><button class="btn g" onclick="closePcForm()">إلغاء</button><button class="btn p" id="pc-save-btn" onclick="savePc()">💾 حفظ القناة</button></div>
+  </div>
 
   <div class="savebar" id="savebar">
     <span class="u" id="save-msg">● تغيير غير محفوظ</span>
@@ -326,7 +396,7 @@ function renderAll() {
   $("#hello").textContent = "مرحباً " + (S.me.name || "") + " 👋";
   $("#botname").textContent = S.bot_name + " · Cpanel";
   $("#ver").textContent = "v" + S.version; $("#ver2").textContent = "v" + S.version;
-  renderStats(S.stats); renderPricing(); renderPayments(); renderServices(); renderMore();
+  renderStats(S.stats); renderPricing(); renderPayments(); renderServices(); renderMore(); renderPartnerSummary();
   updateSavebar();
 }
 function renderStats(st) {
@@ -343,6 +413,7 @@ function renderStats(st) {
   $("#w-topups").textContent = st.pending_topups; $("#w-topups").className = "n" + (st.pending_topups ? " bad" : "");
   $("#w-new").textContent = st.new_orders; $("#w-new").className = "n" + (st.new_orders ? " warn" : "");
   $("#w-text").textContent = st.awaiting_text;
+  const wp = $("#w-posts"); wp.textContent = st.posts_waiting || 0; wp.className = "n" + ((st.posts_waiting||0) > 0 ? " warn" : "");
   const em = {submitted:"🟡",paid:"🟡",submitting:"🟡",in_progress:"🔵",active:"🟢",completed:"✅",paused:"⏸️",rejected:"❌",refunded:"↩️",needs_revision:"✏️",failed_submit:"⚠️",awaiting_payment:"📝",draft:"📝",cancelled:"🚫"};
   $("#statuses").innerHTML = Object.entries(st.by_status).map(([k,v]) => `<span class="chip">${em[k]||"•"} ${v}</span>`).join("") || `<span class="empty">لا طلبات بعد</span>`;
   $("#nour-bal").textContent = st.nour_balance == null ? "—" : money(st.nour_balance) + (st.nour_dry ? " 🧪" : "");
@@ -457,10 +528,17 @@ function renderPayments() {
 /* ───────── services ───────── */
 function renderServices() {
   const box = $("#services"); box.innerHTML = Object.entries(S.service_names).map(([k, name]) => { const locked = S.service_locked[k]; const on = !!W.services[k];
-    return `<div class="row"><div class="lbl">${esc(name)}<span class="h">${esc(locked || (k==="meta" ? (S.stats.nour_dry ? "عبر Nour Ads · 🧪 وضع المحاكاة" : "عبر Nour Ads") : k==="tg_ads" ? "تنفيذ يدوي من حسابك" : "الإضافات تُباع مع الطلب"))}</span></div><button class="sw ${on?"on":""} ${locked?"lock":""}" data-svc="${k}"></button></div>`; }).join("");
+    let hint;
+    if (locked) hint = esc(locked);
+    else if (k === "meta") hint = esc(S.stats.nour_dry ? "عبر Nour Ads · 🧪 وضع المحاكاة" : "عبر Nour Ads");
+    else if (k === "tg_ads") hint = "تنفيذ يدوي من حسابك";
+    else if (k === "tg_post") hint = `📡 ${(S.partner||{}).live||0} قنوات فعّالة · <span class="link" onclick="openPartner()">إدارة القنوات ›</span>`;
+    else hint = "الإضافات تُباع مع الطلب";
+    return `<div class="row"><div class="lbl">${esc(name)}<span class="h">${hint}</span></div><button class="sw ${on?"on":""} ${locked?"lock":""}" data-svc="${k}"></button></div>`; }).join("");
   $$("[data-svc]", box).forEach(el => el.addEventListener("click", () => { if (el.classList.contains("lock")) { toast(S.service_locked[el.dataset.svc], true); return; } W.services[el.dataset.svc] = !W.services[el.dataset.svc]; el.classList.toggle("on", W.services[el.dataset.svc]); markDirty("services"); }));
   bindInputs("general"); fillInputs("general");
 }
+
 
 /* ───────── more ───────── */
 function renderMore() {
@@ -482,7 +560,8 @@ function refreshSection(section) { if (section === "pricing") renderPricing(); e
 function currentDirty() { return tabSections[tab].filter(s => dirty[s]); }
 function updateSavebar() { const d = currentDirty(); $("#savebar").classList.toggle("show", d.length > 0); $("#btn-defaults").classList.toggle("hidden", tab !== "pricing"); if (tg && tg.BackButton) { d.length ? tg.enableClosingConfirmation() : tg.disableClosingConfirmation(); } }
 function resetSection() { currentDirty().forEach(s => { W[s] = clone(S[s]); dirty[s] = false; }); renderAll(); toast("رجعت القيم المحفوظة"); }
-function loadDefaults() { if (!confirm("استعادة الأسعار الافتراضية (أرقام الإطلاق)؟ لن تُحفظ قبل الضغط على 💾")) return; W.pricing = clone(S.pricing_defaults); dirty.pricing = true; renderPricing(); updateSavebar(); }
+function ask(msg) { return new Promise(res => { if (tg && tg.showConfirm) { try { tg.showConfirm(msg, ok => res(!!ok)); return; } catch (e) {} } res(window.confirm(msg)); }); }
+async function loadDefaults() { if (!(await ask("استعادة الأسعار الافتراضية (أرقام الإطلاق)؟ لن تُحفظ قبل الضغط على 💾"))) return; W.pricing = clone(S.pricing_defaults); dirty.pricing = true; renderPricing(); updateSavebar(); }
 async function saveSection() {
   const list = currentDirty(); if (!list.length) return;
   const btn = $("#btn-save"); btn.disabled = true; $("#save-msg").textContent = "⏳ جارٍ الحفظ…";
@@ -496,6 +575,63 @@ async function saveSection() {
   btn.disabled = false; $("#save-msg").textContent = "● تغيير غير محفوظ"; updateSavebar();
 }
 $$(".tab").forEach(b => b.addEventListener("click", () => { tab = b.dataset.tab; $$(".tab").forEach(x => x.classList.toggle("on", x === b)); ["home","pricing","pay","services","more"].forEach(t => $("#tab-"+t).classList.toggle("hidden", t !== tab)); window.scrollTo(0,0); updateSavebar(); }));
+/* ───────── partner channels ───────── */
+let PCF = null, pcCat = "all";
+const PC_ICON = {shopping:"🛍️",tech:"💻",news:"📰",fun:"🎬",edu:"📚",local:"🍽️",general:"📢"};
+const subsLabel = n => { n = Number(n)||0; if (n >= 1e6) return (n/1e6).toFixed(1).replace(/\.0$/,"") + " مليون"; if (n >= 1000) return (n/1000).toFixed(1).replace(/\.0$/,"") + " ألف"; return String(n); };
+function renderPartnerSummary() {
+  const p = S.partner || {items:[], live:0}; const off = p.items.filter(c => !c.enabled && !c.archived).length;
+  $("#pc-summary").textContent = p.live ? `${p.live} قناة فعّالة` + (off ? ` · ${off} متوقفة` : "") : "لا قنوات بعد";
+  $("#pc-summary-h").textContent = p.live ? "زر «📝 نشر في قنوات» مفتوح للعملاء" : "أضف أول قناة ليُفتح زر «📝 نشر في قنوات» للعملاء تلقائياً";
+}
+function openPartner() { pcCat = "all"; renderPartner(); $("#pc-page").classList.remove("hidden"); window.scrollTo(0,0); if (tg && tg.BackButton) { tg.BackButton.show(); tg.BackButton.onClick(backFromPartner); } }
+function backFromPartner() { if (!$("#pc-form").classList.contains("hidden")) closePcForm(); else closePartner(); }
+function closePartner() { $("#pc-page").classList.add("hidden"); if (tg && tg.BackButton) { tg.BackButton.offClick(backFromPartner); tg.BackButton.hide(); } renderServices(); renderPartnerSummary(); }
+function renderPartner() {
+  const p = S.partner; const items = p.items.filter(c => !c.archived);
+  const counts = {}; items.forEach(c => counts[c.category] = (counts[c.category]||0) + 1);
+  $("#pc-cats").innerHTML = [`<span class="chip ${pcCat==="all"?"on":""}" data-c="all">الكل ${items.length}</span>`].concat(Object.keys(counts).map(c => `<span class="chip ${pcCat===c?"on":""}" data-c="${c}">${esc(p.categories[c]||c)} ${counts[c]}</span>`)).join("");
+  $$("#pc-cats .chip").forEach(ch => ch.addEventListener("click", () => { pcCat = ch.dataset.c; renderPartner(); }));
+  const list = items.filter(c => pcCat === "all" || c.category === pcCat);
+  const box = $("#pc-list");
+  box.innerHTML = list.length ? list.map(c => { const q = c.quotes["24h"] || {};
+    return `<div class="pc ${c.enabled?"":"off"}" data-id="${c.id}"><div class="ico">${PC_ICON[c.category]||"📢"}</div><div class="t"><b>${esc(c.title)} <span style="display:inline;color:var(--hint);font-weight:400">${c.username?"@"+esc(c.username):""}</span></b><span>👥 ${subsLabel(c.subscribers)}${c.avg_views?` · 👁️ ~${subsLabel(c.avg_views)} للمنشور`:""}${c.enabled?"":" · متوقفة — لا تظهر للعملاء"}</span><span class="q">القناة <b style="color:var(--tx)">${money(c.price_24h)}</b> ← العميل <b>${money(q.client||0)}</b> · ربحك ${money(q.profit||0)}</span><div class="acts"><button data-edit="${c.id}">✏️ تعديل</button><button data-del="${c.id}">🗑️</button></div></div><button class="sw ${c.enabled?"on":""}" data-tog="${c.id}"></button></div>`; }).join("")
+    : `<div class="small center" style="padding:18px 0">لا قنوات هنا بعد — اضغط «＋ إضافة قناة».</div>`;
+  $$("[data-edit]", box).forEach(b => b.addEventListener("click", () => openPcForm(Number(b.dataset.edit))));
+  $$("[data-del]", box).forEach(b => b.addEventListener("click", () => deletePc(Number(b.dataset.del))));
+  $$("[data-tog]", box).forEach(b => b.addEventListener("click", () => togglePc(Number(b.dataset.tog), !b.classList.contains("on"))));
+  $("#pc-m-posts").textContent = p.month.posts; $("#pc-m-rev").textContent = money(p.month.revenue); $("#pc-m-profit").textContent = money(p.month.profit);
+  $("#pc-mult").textContent = p.mult; $("#pc-pin").textContent = Math.round(Number(p.pin_extra)*100);
+}
+function applyPartner(res) { S.partner = res.partner; if (res.service_locked) S.service_locked = res.service_locked; renderPartner(); renderPartnerSummary(); }
+async function togglePc(id, enabled) { try { applyPartner(await api("partner/toggle", {id, enabled})); toast(enabled ? "✅ القناة ظاهرة للعملاء" : "⏸️ أُخفيت القناة"); } catch (e) { toast(e.message, true); } }
+async function deletePc(id) { const c = S.partner.items.find(x => x.id === id); if (!c) return; if (!(await ask(`حذف «${c.title}»؟ إن كان لها طلبات سابقة تُؤرشف فقط.`))) return; try { const r = await api("partner/delete", {id}); applyPartner(r); toast(r.result === "archived" ? "📦 أُرشفت (لها طلبات سابقة)" : "🗑️ حُذفت"); } catch (e) { toast(e.message, true); } }
+function openPcForm(id) {
+  const c = id ? S.partner.items.find(x => x.id === id) : null;
+  PCF = c ? clone(c) : {title:"", url:"", category:"shopping", subscribers:"", avg_views:"", blurb:"", price_24h:"", price_48h:"", price_pin:"", allow_pin:true, owner_contact:"", notes:"", enabled:true};
+  $("#pc-form-title").textContent = c ? "تعديل: " + c.title : "إضافة قناة";
+  $("#pc-cat-sel").innerHTML = Object.entries(S.partner.categories).map(([k,v]) => `<option value="${k}">${esc(v)}</option>`).join("");
+  $$("[data-pc]").forEach(el => { const k = el.dataset.pc; const v = PCF[k];
+    if (el.classList.contains("sw")) { el.classList.toggle("on", !!v); el.onclick = () => { PCF[k] = !PCF[k]; el.classList.toggle("on", PCF[k]); pcPreview(); }; }
+    else { el.value = v == null ? "" : v; el.oninput = () => { PCF[k] = el.value; pcPreview(); }; } });
+  pcPreview(); $("#pc-form").classList.remove("hidden"); window.scrollTo(0,0);
+}
+function closePcForm() { $("#pc-form").classList.add("hidden"); PCF = null; }
+function pcPreview() {
+  const mult = Number(S.partner.mult)||1.25, pin = Number(S.partner.pin_extra)||0.5; const p24 = Number(PCF.price_24h), p48 = Number(PCF.price_48h), pp = Number(PCF.price_pin);
+  if (!p24) { $("#pc-prev").innerHTML = "👀 اكتب سعر منشور 24 ساعة لترى ما سيدفعه العميل"; return; }
+  const q = (cost) => `<b>${money(cost*mult)}</b> (ربحك ${money(cost*(mult-1))})`;
+  let out = `👀 <b>يدفع العميل:</b> 24 س ${q(p24)}`; if (PCF.price_48h !== "" && p48) out += ` · 48 س ${q(p48)}`;
+  if (PCF.allow_pin) out += ` · 📌 مثبَّت ${q(PCF.price_pin !== "" && pp ? pp : p24*(1+pin))}`;
+  $("#pc-prev").innerHTML = out;
+}
+async function savePc() {
+  const btn = $("#pc-save-btn"); btn.disabled = true;
+  try { const r = await api("partner/save", PCF); applyPartner(r); closePcForm(); toast(PCF && PCF.id ? "✅ حُفظت التعديلات" : "✅ أُضيفت القناة — الزر مفتوح للعملاء الآن"); }
+  catch (e) { toast(e.message, true); }
+  btn.disabled = false;
+}
+
 boot();
 </script>
 </body>

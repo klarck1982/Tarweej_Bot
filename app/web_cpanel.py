@@ -5,6 +5,7 @@
     POST /cpanel/api/stats       الإحصائيات لفترة
     POST /cpanel/api/save/<sec>  حفظ قسم: pricing | general | payments | services
     POST /cpanel/api/channel_test  رسالة تجريبية إلى قناة
+    POST /cpanel/api/partner/{save|toggle|delete}   القنوات الشريكة (v0.6.0)
 
 كل طلب API يحمل ترويسة X-Telegram-Init-Data؛ نتحقق من التوقيع ومن ADMIN_IDS في كل مرة (بلا جلسات).
 """
@@ -115,7 +116,44 @@ def make_channel_test(bot: Bot):
     return channel_test
 
 
+async def partner_save(request: web.Request) -> web.Response:
+    user = _auth(request)
+    body = await _body(request)
+    try:
+        ch = await CP.save_partner_channel(body, user["id"])
+    except ValueError as e:
+        return _json({"error": "invalid", "message": str(e)}, 400)
+    except Exception as e:  # noqa: BLE001
+        log.exception("partner save failed: %s", e)
+        return _json({"error": "server", "message": "خطأ غير متوقع أثناء الحفظ — حاول مرة أخرى."}, 500)
+    return _json({"ok": True, "channel": ch, "partner": await CP.partner_channels_view(), "service_locked": await CP.service_locks()})
+
+
+async def partner_toggle(request: web.Request) -> web.Response:
+    user = _auth(request)
+    body = await _body(request)
+    try:
+        ch = await CP.toggle_partner_channel(int(body.get("id") or 0), bool(body.get("enabled")), user["id"])
+    except Exception as e:  # noqa: BLE001
+        return _json({"error": "server", "message": str(e)[:160]}, 500)
+    if not ch:
+        return _json({"error": "missing", "message": "القناة غير موجودة"}, 404)
+    return _json({"ok": True, "channel": ch, "partner": await CP.partner_channels_view(), "service_locked": await CP.service_locks()})
+
+
+async def partner_delete(request: web.Request) -> web.Response:
+    user = _auth(request)
+    body = await _body(request)
+    res = await CP.delete_partner_channel(int(body.get("id") or 0), user["id"])
+    if res == "missing":
+        return _json({"error": "missing", "message": "القناة غير موجودة"}, 404)
+    return _json({"ok": True, "result": res, "partner": await CP.partner_channels_view(), "service_locked": await CP.service_locks()})
+
+
 def setup_cpanel(app: web.Application, bot: Bot) -> None:
+    app.router.add_post("/cpanel/api/partner/save", partner_save)
+    app.router.add_post("/cpanel/api/partner/toggle", partner_toggle)
+    app.router.add_post("/cpanel/api/partner/delete", partner_delete)
     app.router.add_get("/cpanel", page)
     app.router.add_post("/cpanel/api/snapshot", snapshot)
     app.router.add_post("/cpanel/api/stats", stats)

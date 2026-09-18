@@ -91,6 +91,28 @@ async def _sync_open_orders(bot: Bot) -> None:
         await asyncio.sleep(1.2)  # نور: 60 طلباً/دقيقة كحد أقصى
 
 
+async def _partner_posts(bot: Bot) -> None:
+    """📝 القنوات الشريكة: إنهاء تلقائي بعد 24/48 ساعة من النشر + تذكير الأدمن قبل الموعد بساعة."""
+    from app.services import partner_posts as PP
+    try:
+        for o in await PP.finish_due():
+            await ON.push_user_status(bot, o)
+            await ON.refresh_admin_cards(bot, o["id"])
+            await ON.notify_admins_text(bot, T_auto_done(o))
+        for o in await PP.reminders_due(60):
+            mins = max(1, int((o["scheduled_at"] - datetime.now(o["scheduled_at"].tzinfo)).total_seconds() // 60))
+            from app.bot import texts as T
+            await ON.notify_admins_text(bot, T.ADMIN_TGP_REMINDER.format(id=o["id"], title=ON.esc(o["spec"].get("channel_title")),
+                                                                       when=ON._when(o["scheduled_at"]), mins=mins))
+    except Exception as e:  # noqa: BLE001
+        log.warning("partner posts job failed: %s", e)
+
+
+def T_auto_done(o: dict) -> str:
+    from app.bot import texts as T
+    return T.ADMIN_TGP_AUTO_DONE.format(id=o["id"], title=ON.esc(o["spec"].get("channel_title")))
+
+
 async def tick(bot: Bot) -> None:
     """دورة واحدة — تُستدعى من الحلقة، ويمكن استدعاؤها يدوياً في الاختبارات."""
     from app.services import cpanel, pricing
@@ -99,6 +121,7 @@ async def tick(bot: Bot) -> None:
     await _retry_submissions(bot)
     await _expire_drafts(bot)
     await _sync_open_orders(bot)
+    await _partner_posts(bot)
 
 
 async def run_forever(bot: Bot) -> None:
