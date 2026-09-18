@@ -6,6 +6,10 @@
     POST /cpanel/api/save/<sec>  حفظ قسم: pricing | general | payments | services
     POST /cpanel/api/channel_test  رسالة تجريبية إلى قناة
     POST /cpanel/api/partner/{save|toggle|delete}   القنوات الشريكة (v0.6.0)
+    POST /cpanel/api/nour/test      اختبار اتصال Nour Ads الآن (v0.7.0)
+    POST /cpanel/api/nour/report    إرسال تقرير المطابقة الآن إلى قناة التنبيهات
+    POST /cpanel/api/reset/preview  أرقام ما سيُمسح + هل مسموح
+    POST /cpanel/api/reset/execute  🧨 التصفير (كلمة تأكيد «تصفير»)
 
 كل طلب API يحمل ترويسة X-Telegram-Init-Data؛ نتحقق من التوقيع ومن ADMIN_IDS في كل مرة (بلا جلسات).
 """
@@ -150,7 +154,64 @@ async def partner_delete(request: web.Request) -> web.Response:
     return _json({"ok": True, "result": res, "partner": await CP.partner_channels_view(), "service_locked": await CP.service_locks()})
 
 
+async def nour_test(request: web.Request) -> web.Response:
+    _auth(request)
+    from app.services import nour_health as NH
+    res = await NH.check()
+    return _json({"ok": res["ok"], "result": res, "nour": await NH.status_view()}, 200 if res["ok"] else 400)
+
+
+def make_nour_report(bot: Bot):
+    async def nour_report(request: web.Request) -> web.Response:
+        _auth(request)
+        from app.services import nour_health as NH
+        try:
+            text = await NH.daily_report(bot, force=True)
+        except Exception as e:  # noqa: BLE001
+            log.exception("nour report failed: %s", e)
+            return _json({"error": "server", "message": f"فشل إعداد التقرير: {str(e)[:120]}"}, 500)
+        return _json({"ok": True, "text": text, "nour": await NH.status_view()})
+    return nour_report
+
+
+async def reset_preview(request: web.Request) -> web.Response:
+    _auth(request)
+    from app.services import launch_reset as LR
+    return _json(await LR.preview())
+
+
+def make_reset_execute(bot: Bot):
+    async def reset_execute(request: web.Request) -> web.Response:
+        user = _auth(request)
+        body = await _body(request)
+        from app.services import launch_reset as LR
+        try:
+            res = await LR.execute(user["id"], str(body.get("confirm", "")), wipe_partner=bool(body.get("wipe_partner", True)))
+        except ValueError as e:
+            return _json({"error": "invalid", "message": str(e)}, 400)
+        except Exception as e:  # noqa: BLE001
+            log.exception("launch reset failed: %s", e)
+            return _json({"error": "server", "message": f"فشل التصفير — لم يتغير شيء: {str(e)[:120]}"}, 500)
+        from app.services import pricing as P
+        await P.refresh(); await CP.refresh_runtime()
+        try:
+            from app.services import channels as CH
+            b = res["before"]
+            await CH.alert(bot, f"🧨 <b>تصفير ما قبل الانطلاق</b> نفّذه <code>{user['id']}</code>\n"
+                                f"مُسح: {b.get('users', 0)} مستخدم · {b.get('orders', 0)} طلب · {b.get('topups', 0)} شحنة"
+                                f"{' · ' + str(b.get('partner_channels', 0)) + ' قناة شريكة' if res['wipe_partner'] else ''}\n"
+                                f"العدّادات عادت إلى 1 — أول طلب حقيقي سيكون <b>#ORD-1</b>. الإعدادات والأسعار كما هي ✅")
+        except Exception:  # noqa: BLE001
+            pass
+        return _json({"ok": True, **res, "snapshot": await CP.snapshot()})
+    return reset_execute
+
+
 def setup_cpanel(app: web.Application, bot: Bot) -> None:
+    app.router.add_post("/cpanel/api/nour/test", nour_test)
+    app.router.add_post("/cpanel/api/nour/report", make_nour_report(bot))
+    app.router.add_post("/cpanel/api/reset/preview", reset_preview)
+    app.router.add_post("/cpanel/api/reset/execute", make_reset_execute(bot))
     app.router.add_post("/cpanel/api/partner/save", partner_save)
     app.router.add_post("/cpanel/api/partner/toggle", partner_toggle)
     app.router.add_post("/cpanel/api/partner/delete", partner_delete)

@@ -114,6 +114,12 @@ async def on_startup(bot: Bot, migrations: list[str]) -> None:
         bot=settings.bot_name, version=VERSION, step=STEP, mode=settings.mode,
         migrations=", ".join(migrations) if migrations else "لا شيء", users=users_count,
     ) + f"\nالأدمن المحمّلون: {len(settings.admin_ids)}")
+    # v0.7.0: فحص اتصال Nour Ads عند الإقلاع (لا يوقف البوت مهما كانت النتيجة)
+    try:
+        from app.services import nour_health
+        await nour_health.startup_check(bot)
+    except Exception as e:  # noqa: BLE001
+        log.warning("nour startup check failed: %s", e)
 
 
 async def run() -> None:

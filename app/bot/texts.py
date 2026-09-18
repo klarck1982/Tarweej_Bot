@@ -535,6 +535,14 @@ ADMIN_ORDERS_LIST = "📦 <b>الطلبات المفتوحة ({n})</b> — اض�
 ADMIN_ORDER_REFUND_CONFIRM = "↩️ استرداد <b>{price}</b> كاملاً للعميل وإغلاق #ORD-{id}؟ اكتب السبب بسطر واحد (سيصل للعميل):"
 ADMIN_ORDER_ALERT_NEW = "🔔 <b>طلب جديد #ORD-{id}</b> — {price} — {name}"
 ADMIN_ORDER_ALERT_STUCK = "⚠️ <b>#ORD-{id} عالق قبل نور</b>\n{note}"
+ADMIN_ORDER_ALERT_NOUR_BALANCE = (
+    "💼 <b>#ORD-{id} ينتظر شحن رصيد Nour Ads</b>\n{note}\n"
+    "مال العميل محفوظ عندنا؛ اشحن حسابك في nour-ads.com ويُرسل الطلب تلقائياً خلال 30 دقيقة (أو من زر «📨 إعادة الإرسال» فوراً)."
+)
+META_DELAY_NOTICE = (
+    "ℹ️ <b>#ORD-{id}:</b> استلمنا طلبك وهو في قائمة التنفيذ — قد يتأخر بدء المراجعة قليلاً (حتى بضع ساعات) لضغط مؤقت عند فريق التنفيذ. "
+    "مبلغك محفوظ ولن تحتاج لفعل شيء؛ بنبلّغك فور بدء التجهيز 🙏"
+)
 ADMIN_ORDER_ALERT_CHARGE = "⚠️ <b>#ORD-{id}: فرق في خصم نور</b>\n{note}"
 ADMIN_ORDER_SIM_HELP = "🧪 <b>محاكاة نور</b> — اضغط الحالة التالية كأنها جاءت من الشريك:"
 ADMIN_FALLBACK_EDIT = (

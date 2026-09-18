@@ -395,10 +395,10 @@ async def save_partner_channel(raw: dict, admin_id: int) -> dict:
         ch = await PC.update(int(cid), data)
         for k, v in data.items():
             if str(before.get(k)) != str(v):
-                await audit(admin_id, "channels", f"{ch['title']}.{k}", before.get(k), v)
+                await audit(admin_id, "partner", f"{ch['title']}.{k}", before.get(k), v)
     else:
         ch = await PC.create(data)
-        await audit(admin_id, "channels", "add", None, f"{ch['title']} · {ch['price_24h']}$")
+        await audit(admin_id, "partner", "إضافة قناة", None, f"{ch['title']} · {ch['price_24h']}$")
     return PP.channel_view(ch)
 
 
@@ -410,7 +410,7 @@ async def toggle_partner_channel(channel_id: int, enabled: bool, admin_id: int) 
         return None
     if ch["enabled"] != enabled:
         ch = await PC.update(channel_id, {"enabled": enabled})
-        await audit(admin_id, "channels", f"{ch['title']}.enabled", not enabled, enabled)
+        await audit(admin_id, "partner", f"{ch['title']}.enabled", not enabled, enabled)
     return PP.channel_view(ch)
 
 
@@ -420,7 +420,7 @@ async def delete_partner_channel(channel_id: int, admin_id: int) -> str:
     if not ch:
         return "missing"
     res = await PC.delete_or_archive(channel_id)
-    await audit(admin_id, "channels", f"{ch['title']}.{res}", True, False)
+    await audit(admin_id, "partner", f"{ch['title']}.{res}", True, False)
     return res
 
 
@@ -445,4 +445,21 @@ async def snapshot() -> dict:
         "payments": await PM.get_methods(), "payment_order": PM.METHOD_ORDER, "syp_rate": str(await PM.syp_rate()),
         "services": await settings_repo.services(), "service_names": SERVICE_NAMES, "service_locked": await service_locks(),
         "channels": await channels_view(), "partner": await partner_channels_view(), "audit": await audit_log(30),
+        "nour": await _nour_view(), "reset": await _reset_preview(),
     }
+
+
+async def _nour_view() -> dict:
+    from app.services import nour_health as NH
+    try:
+        return await NH.status_view()
+    except Exception as e:  # noqa: BLE001
+        return {"dry": _nour_dry(), "error": str(e)[:120]}
+
+
+async def _reset_preview() -> dict:
+    from app.services import launch_reset as LR
+    try:
+        return await LR.preview()
+    except Exception as e:  # noqa: BLE001
+        return {"allowed": False, "blockers": [str(e)[:120]], "counts": {}}

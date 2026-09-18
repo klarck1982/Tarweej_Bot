@@ -16,7 +16,9 @@ services:
       - key: TZ
         value: Asia/Damascus
       - key: NOUR_DRY_RUN
-        value: "1"
+        value: "1"        # v0.7.0: بعد نجاح «اختبار الاتصال» في Cpanel غيّرها إلى "0"
+      - key: NOUR_ADS_TOKEN
+        sync: false       # التوكن mca_live_… من nour-ads.com — يُضاف من لوحة Render فقط
       - key: BOT_NAME
         value: "ترويج بوت"
       - key: BOT_TOKEN

@@ -180,7 +180,15 @@ async def notify_admins_new_order(bot: Bot, order_id: int) -> None:
     if msg_ids:
         await repo.set_messages(order_id, admin_msg_ids=msg_ids)
     if order["status"] == "paid" and order.get("note"):
-        await notify_admins_text(bot, T.ADMIN_ORDER_ALERT_STUCK.format(id=order_id, note=esc(order["note"])))
+        if "رصيد نور" in order["note"]:
+            await notify_admins_text(bot, T.ADMIN_ORDER_ALERT_NOUR_BALANCE.format(id=order_id, note=esc(order["note"])))
+            # العميل: طمأنة بأن الطلب مقبول وقد يتأخر قليلاً (بلا ذكر رصيدنا)
+            try:
+                await bot.send_message(order["user_id"], T.META_DELAY_NOTICE.format(id=order_id))
+            except Exception as e:  # noqa: BLE001
+                log.debug("delay notice failed for ORD-%s: %s", order_id, e)
+        else:
+            await notify_admins_text(bot, T.ADMIN_ORDER_ALERT_STUCK.format(id=order_id, note=esc(order["note"])))
     elif (order.get("note") or "").startswith("⚠️ فرق"):
         await notify_admins_text(bot, T.ADMIN_ORDER_ALERT_CHARGE.format(id=order_id, note=esc(order["note"])))
 

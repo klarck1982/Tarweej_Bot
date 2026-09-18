@@ -37,6 +37,7 @@ NON_RETRYABLE = {"invalid_platform", "budget_too_low", "not_found", "bad_request
 class NourError(Exception):
     def __init__(self, code: str, message: str = "", http: int = 0, details: dict | None = None) -> None:
         self.code = code
+        self.message = message
         self.http = http
         self.details = details or {}
         super().__init__(f"{code} ({http}): {message}")

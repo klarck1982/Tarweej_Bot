@@ -122,6 +122,20 @@ async def tick(bot: Bot) -> None:
     await _expire_drafts(bot)
     await _sync_open_orders(bot)
     await _partner_posts(bot)
+    await _nour_health(bot)
+
+
+async def _nour_health(bot: Bot) -> None:
+    """v0.7.0: مراقبة رصيد نور (كل ساعة) + تقرير المطابقة اليومي (09:00)."""
+    from app.services import nour_health as NH
+    try:
+        await NH.watch_balance(bot)
+    except Exception as e:  # noqa: BLE001
+        log.warning("nour balance watch failed: %s", e)
+    try:
+        await NH.daily_report(bot)
+    except Exception as e:  # noqa: BLE001
+        log.warning("nour daily report failed: %s", e)
 
 
 async def run_forever(bot: Bot) -> None:

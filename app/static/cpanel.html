@@ -116,6 +116,14 @@ textarea{min-height:60px;resize:vertical}
 .link{color:var(--b2);font-weight:700;cursor:pointer}
 .formbar{position:fixed;left:0;right:0;bottom:0;display:flex;gap:8px;padding:10px 12px calc(12px + env(safe-area-inset-bottom));background:var(--card);border-top:1px solid var(--line);z-index:25}
 .formbar .btn{flex:1}
+.btn.d{background:var(--bad);color:#fff}.btn:disabled{opacity:.5;cursor:default}
+.nour{display:flex;align-items:center;gap:10px;padding:10px 0}.nour .ico{width:40px;height:40px;border-radius:12px;display:grid;place-items:center;font-size:20px;background:var(--input);flex:none}
+.nour .t{flex:1;min-width:0}.nour .t b{display:block;font-size:14px}.nour .t span{display:block;font-size:11.5px;color:var(--hint);line-height:1.5}
+.nour.ok .ico{background:rgba(52,199,89,.15)}.nour.bad .ico{background:rgba(255,59,48,.15)}.nour.dry .ico{background:rgba(255,159,10,.15)}
+.danger{border:1px solid rgba(255,59,48,.35)}.danger .ctitle{color:var(--bad)}
+.wipe{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:8px 0}.wipe div{background:var(--input);border-radius:10px;padding:8px 10px;font-size:12px}.wipe div b{display:block;font-size:16px}
+.wipe div.keep{background:rgba(52,199,89,.12)}
+.confirm{width:100%;font-size:16px;text-align:center;letter-spacing:1px;margin-top:8px}
 .center{text-align:center}
 .empty{color:var(--hint);text-align:center;padding:14px 0;font-size:12.5px}
 .warnbox{background:rgba(255,159,10,.12);border:1px solid rgba(255,159,10,.5);border-radius:10px;padding:8px 10px;font-size:12px;margin:8px 0}
@@ -267,6 +275,8 @@ textarea{min-height:60px;resize:vertical}
   <!-- ═══ المزيد ═══ -->
   <section id="tab-more" class="hidden">
     <div class="hero"><div class="ht">⚙️ المزيد</div><div class="hs">القنوات · الإعدادات العامة · سجل التغييرات</div></div>
+    <div class="sec">🔌 Nour Ads (شريك إعلانات Meta)</div>
+    <div class="card" id="nour-card"></div>
     <div class="sec">📡 قنوات الإدارة</div>
     <div class="card" id="channels"></div>
     <div class="prev" style="margin:4px 12px">➕ لربط قناة: أضف البوت مشرفاً فيها، ثم اختر دورها من الرسالة التي تصلك في الخاص — لا حاجة لنسخ أرقام.</div>
@@ -286,9 +296,31 @@ textarea{min-height:60px;resize:vertical}
     <div class="card"><div class="row"><div class="chips" style="margin:0" id="admins"></div></div></div>
     <div class="sec">🧾 آخر التغييرات</div>
     <div class="card" id="audit"></div>
+    <div class="sec" style="color:var(--bad)">🧨 منطقة الخطر</div>
+    <div class="card danger">
+      <div class="row"><div class="lbl">تصفير ما قبل الانطلاق<span class="h" id="reset-h">يمسح كل البيانات التجريبية ويعيد الترقيم إلى #ORD-1 — الإعدادات تبقى</span></div><button class="btn g sm" style="color:var(--bad)" onclick="openReset()">فتح ›</button></div>
+    </div>
     <div class="center small" style="padding:14px 0 6px">ترويج بوت · Cpanel <span id="ver2"></span> · Crafted with Arena.ai ✨</div>
     <div style="height:70px"></div>
   </section>
+
+  <!-- ═══ 🧨 التصفير — صفحة فرعية ═══ -->
+  <div class="subpage hidden" id="reset-page">
+    <div class="hero" style="background:linear-gradient(135deg,#ff3b30,#ff9f0a)"><div class="subhead"><button onclick="closeReset()">‹ رجوع</button><div><div class="hi">⚙️ المزيد ›</div><div class="ht">🧨 تصفير ما قبل الانطلاق</div></div></div></div>
+    <div class="prev" style="margin:10px 12px;border-color:var(--bad);background:rgba(255,59,48,.08)">تُستخدم <b>مرة واحدة</b> قبل فتح البوت للعملاء: تمسح كل التجارب وتعيد العدّادات إلى 1 (أول طلب حقيقي = <b>#ORD-1</b>). لا تراجع بعدها.</div>
+    <div class="sec">🗑️ سيُمسح</div>
+    <div class="card pad"><div class="wipe" id="reset-wipe"></div></div>
+    <div class="sec">✅ يبقى كما هو</div>
+    <div class="card pad"><div class="chips" style="margin:0" id="reset-keeps"></div></div>
+    <div class="card pad" id="reset-block" style="display:none;border:1px solid var(--bad)"><b style="color:var(--bad)">⛔ غير مسموح الآن</b><div class="small" id="reset-block-msg"></div></div>
+    <div class="sec">✍️ التأكيد</div>
+    <div class="card pad">
+      <div class="row"><div class="lbl">مسح القنوات الشريكة التجريبية أيضاً<span class="h">أطفئه لو أضفت قنوات حقيقية بالفعل</span></div><button class="sw on" id="reset-partner" onclick="this.classList.toggle('on')"></button></div>
+      <div class="small">اكتب كلمة <b id="reset-word">تصفير</b> في الحقل ثم اضغط الزر الأحمر:</div>
+      <input type="text" class="confirm" id="reset-input" placeholder="تصفير" autocomplete="off" oninput="resetGuard()">
+    </div>
+    <div class="formbar"><button class="btn g" onclick="closeReset()">إلغاء</button><button class="btn d" id="reset-btn" onclick="doReset()" disabled>🧨 صفّر كل شيء الآن</button></div>
+  </div>
 
   <!-- ═══ القنوات الشريكة — صفحة القائمة ═══ -->
   <div class="subpage hidden" id="pc-page">
@@ -544,12 +576,64 @@ function renderServices() {
 function renderMore() {
   $("#channels").innerHTML = S.channels.map(c => `<div class="chan"><div class="ico">${c.emoji}</div><div class="t"><b>${esc(c.name)}</b><span><i class="dot ${c.bound?"":"off"}"></i>${c.bound ? esc(c.title) + " · " + c.id : "غير مربوطة — تصل في خاصّك"}</span></div>${c.bound?`<button class="btn g sm" data-test="${c.kind}">🧪 اختبار</button>`:""}</div>`).join("");
   $$("[data-test]").forEach(b => b.addEventListener("click", async () => { b.disabled = true; try { await api("channel_test", {kind: b.dataset.test}); toast("وصلت ✅"); } catch(e) { toast(e.message, true); } b.disabled = false; }));
+  renderNour();
   $("#updates-env").textContent = S.general_env.updates_channel ? "فارغ = يُستخدم رابط متغير البيئة: " + S.general_env.updates_channel : "فارغ = لا يظهر زر القناة";
   $("#support-env").textContent = S.general_env.support_username ? "فارغ = @" + S.general_env.support_username + " من متغير البيئة" : "بدون @";
   $("#admins").innerHTML = S.admins.map(a => `<span class="chip">${a === S.me.id ? "أنت · " : ""}${a}</span>`).join("") + `<span class="chip add">+ عبر Render</span>`;
-  const secName = {pricing:"الأسعار", general:"عام", payments:"الدفع", services:"الخدمات"};
+  const secName = {pricing:"الأسعار", general:"عام", payments:"الدفع", services:"الخدمات", partner:"القنوات الشريكة", danger:"🧨 منطقة الخطر"};
   $("#audit").innerHTML = S.audit.length ? S.audit.map(a => `<div class="log"><b>${esc(secName[a.section]||a.section)} · ${esc(a.key)}</b> ${esc(fmtVal(a.before))} → <b>${esc(fmtVal(a.after))}</b><br><span>${a.admin_id === S.me.id ? "أنت" : a.admin_id} · ${new Date(a.at).toLocaleString("ar-SY",{dateStyle:"short",timeStyle:"short"})}</span></div>`).join("") : `<div class="empty">لا تغييرات بعد — كل حفظ يُسجَّل هنا</div>`;
   bindInputs("general"); fillInputs("general");
+}
+function renderNour() {
+  const n = S.nour || {}; const box = $("#nour-card");
+  const when = (iso) => iso ? new Date(iso).toLocaleString("ar-SY", {dateStyle:"short", timeStyle:"short"}) : "—";
+  let cls = "dry", ico = "🧪", title = "وضع المحاكاة — لا يُرسل شيء لنور", sub = n.token_set ? "التوكن موجود في Render · للتفعيل اضبط NOUR_DRY_RUN=0" : "أضف NOUR_ADS_TOKEN في Render ثم اختبر الاتصال من هنا وأنت ما زلت في المحاكاة";
+  if (!n.dry) {
+    if (n.last_error && (!n.last_ok_at || new Date(n.last_error_at||0) > new Date(n.last_ok_at))) { cls = "bad"; ico = "🔴"; title = "متصل بالحقيقي — لكن آخر اتصال فشل"; sub = n.last_error; }
+    else { cls = "ok"; ico = "🟢"; title = "متصل بـ Nour Ads الحقيقي"; sub = "الحساب: " + (n.account || "—") + " · آخر فحص ناجح " + when(n.last_ok_at); }
+  } else if (n.last_ok_at && n.token_set) { sub += " · التوكن يعمل ✅ (" + (n.account || "") + ")"; }
+  const bal = n.balance == null ? "—" : money(n.balance) + (n.dry ? " 🧪" : "");
+  const low = !n.dry && n.balance != null && Number(n.balance) < Number(n.threshold||50);
+  box.innerHTML = `<div class="nour ${cls}"><div class="ico">${ico}</div><div class="t"><b>${esc(title)}</b><span>${esc(sub||"")}</span></div></div>
+    <div class="row"><span>💼 الرصيد عند نور</span><b class="n ${low?"bad":""}" style="${low?"":"background:var(--input)"}">${bal}${low?" ⚠️":""}</b></div>
+    <div class="row"><span>🔔 حد التنبيه</span><span class="small">أقل من ${money(n.threshold||50)} (يُعدَّل أدناه) · ${n.low_alert_at ? "⚠️ تنبيه فعّال منذ " + when(n.low_alert_at) : "لا تنبيه فعّال"}</span></div>
+    <div class="row"><span>🧾 تقرير المطابقة اليومي</span><span class="small">09:00 إلى قناة التنبيهات · آخر تقرير: ${n.report_date || "—"}</span></div>
+    <div class="row" style="gap:8px"><button class="btn p sm" style="flex:1" id="nour-test-btn" onclick="nourTest()">🔌 اختبار الاتصال الآن</button><button class="btn g sm" style="flex:1" id="nour-rep-btn" onclick="nourReport()">📨 أرسل التقرير الآن</button></div>`;
+}
+async function nourTest() {
+  const b = $("#nour-test-btn"); b.disabled = true; b.textContent = "⏳ جارٍ الاتصال…";
+  try { const r = await api("nour/test"); S.nour = r.nour; renderNour(); toast(`✅ متصل — ${r.result.account || ""} · الرصيد ${money(r.result.balance||0)}`); }
+  catch (e) { try { const snap = await api("snapshot"); S.nour = snap.nour; renderNour(); } catch (_) {} toast(e.message, true); }
+  b.disabled = false; b.textContent = "🔌 اختبار الاتصال الآن";
+}
+async function nourReport() {
+  const b = $("#nour-rep-btn"); b.disabled = true;
+  try { const r = await api("nour/report"); S.nour = r.nour; renderNour(); toast("📨 أُرسل التقرير إلى قناة التنبيهات"); }
+  catch (e) { toast(e.message, true); }
+  b.disabled = false;
+}
+/* ───────── 🧨 التصفير ───────── */
+function openReset() { renderReset(S.reset || {}); $("#reset-page").classList.remove("hidden"); window.scrollTo(0,0); if (tg && tg.BackButton) { tg.BackButton.show(); tg.BackButton.onClick(closeReset); } api("reset/preview").then(p => { S.reset = p; renderReset(p); }).catch(()=>{}); }
+function closeReset() { $("#reset-page").classList.add("hidden"); $("#reset-input").value = ""; resetGuard(); if (tg && tg.BackButton) { tg.BackButton.offClick(closeReset); tg.BackButton.hide(); } }
+function renderReset(p) {
+  const c = p.counts || {}; const item = (n, l, keep) => `<div class="${keep?"keep":""}"><b>${n}</b>${l}</div>`;
+  $("#reset-wipe").innerHTML = item(c.users||0, "مستخدم (أرصدتهم " + money(p.client_balances||0) + ")") + item(c.orders||0, "طلب") + item(c.topups||0, "شحنة") + item(c.tickets||0, "تذكرة") + item(c.events||0, "حدث/سجل") + item(c.partner_channels||0, "قناة شريكة");
+  $("#reset-keeps").innerHTML = (p.keeps||[]).map(k => `<span class="chip">${esc(k)}</span>`).join("");
+  $("#reset-word").textContent = p.confirm_word || "تصفير";
+  const blocked = p.allowed === false; $("#reset-block").style.display = blocked ? "" : "none"; $("#reset-block-msg").textContent = (p.blockers||[]).join(" ");
+  resetGuard();
+}
+function resetGuard() { const p = S.reset || {}; const ok = p.allowed !== false && $("#reset-input").value.trim() === (p.confirm_word || "تصفير"); $("#reset-btn").disabled = !ok; }
+async function doReset() {
+  const p = S.reset || {}; if (!(await ask("آخر تأكيد: سيُمسح كل شيء تشغيلي نهائياً ولا رجعة. متابعة؟"))) return;
+  const b = $("#reset-btn"); b.disabled = true; b.textContent = "⏳ جارٍ التصفير…";
+  try {
+    const r = await api("reset/execute", {confirm: $("#reset-input").value.trim(), wipe_partner: $("#reset-partner").classList.contains("on")});
+    const me = S.me; S = r.snapshot; S.me = me; S.stats = await api("stats", {period: "7d"});
+    W = {pricing: clone(S.pricing), general: clone(S.general), payments: clone(S.payments), services: clone(S.services)};
+    renderAll(); closeReset(); toast("🧨 تم التصفير — البوت جاهز للانطلاق، أول طلب سيكون #ORD-1");
+  } catch (e) { toast(e.message, true); }
+  b.disabled = false; b.textContent = "🧨 صفّر كل شيء الآن";
 }
 function fmtVal(v) { if (v === true) return "مفعّل"; if (v === false) return "مُطفأ"; if (v == null || v === "") return "—"; if (typeof v === "object") return JSON.stringify(v); return String(v).length > 40 ? String(v).slice(0,40)+"…" : String(v); }
 
