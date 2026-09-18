@@ -60,11 +60,14 @@ DEFAULTS: dict[str, Any] = {
     },
     "voiceover": "5",
     "addon_bundles": [
-        {"title": "نص + صورة", "price": "11", "was": "13"},
-        {"title": "نص + صورة + ريل", "price": "24", "was": "28"},
-        {"title": "نص + صورتان + مونتاج", "price": "46", "was": "54"},
+        {"title": "نص + صورة", "price": "11", "was": "13", "items": ["copy", "design"]},
+        {"title": "نص + صورة + ريل", "price": "24", "was": "28", "items": ["copy", "design", "reel"]},
+        {"title": "نص + صورة + ريل + مونتاج", "price": "46", "was": "53", "items": ["copy", "design", "reel", "montage"]},
     ],
 }
+
+# باقة قديمة حُفظت قبل v0.8.0 بأرقام غير متسقة (5+8+8+25 = 46 بلا توفير حقيقي) → تُرقّى تلقائياً إلى الباقة الجديدة
+_LEGACY_BUNDLES = {("نص + صورتان + مونتاج", "46", "54"): DEFAULTS["addon_bundles"][2]}
 
 ADDON_ORDER = ("copy", "design", "reel", "montage")
 CORE_PACKAGES = ("trial", "growth", "pro")   # لا تُحذف — تُعطَّل فقط
@@ -115,9 +118,33 @@ def merged(raw: dict | None) -> dict:
     for key in ("packages", "addon_bundles"):
         if isinstance(raw.get(key), list):
             out[key] = copy.deepcopy(raw[key])
+    # v0.8.0: كل باقة إضافات تعرف محتوياتها (items) — النسخ المحفوظة قبل ذلك تُستكمل من الافتراضيات أو من العنوان
+    for i, b in enumerate(out["addon_bundles"]):
+        if not b.get("items") and (b.get("title"), str(b.get("price")), str(b.get("was"))) in _LEGACY_BUNDLES:
+            out["addon_bundles"][i] = b = copy.deepcopy(_LEGACY_BUNDLES[(b.get("title"), str(b.get("price")), str(b.get("was")))])
+        if not b.get("items"):
+            dflt = DEFAULTS["addon_bundles"][i]["items"] if i < len(DEFAULTS["addon_bundles"]) and \
+                DEFAULTS["addon_bundles"][i]["title"] == b.get("title") else None
+            b["items"] = list(dflt or bundle_items_from_title(str(b.get("title") or "")))
     if raw.get("voiceover") is not None:
         out["voiceover"] = raw["voiceover"]
     return out
+
+
+def bundle_items_from_title(title: str) -> list[str]:
+    """يستنتج محتويات باقة إضافات من عنوانها («نص + صورتان + مونتاج» ← copy, design, design, montage)."""
+    items: list[str] = []
+    if "نص" in title:
+        items.append("copy")
+    if "صورتان" in title or "صورتين" in title:
+        items += ["design", "design"]
+    elif "صور" in title:
+        items.append("design")
+    if "ريل" in title:
+        items.append("reel")
+    if "مونتاج" in title:
+        items.append("montage")
+    return items or ["copy", "design"]
 
 
 def _build(cfg: dict) -> dict[str, Any]:
@@ -143,7 +170,9 @@ def _build(cfg: dict) -> dict[str, Any]:
         "TG_POST_MULT": D(str(cfg["tg_post"]["mult"])), "TG_POST_PIN_EXTRA": D(str(cfg["tg_post"]["pin_extra"])),
         "ADDONS": {c: addons[c] for c in ADDON_ORDER if c in addons} | {c: a for c, a in addons.items() if c not in ADDON_ORDER},
         "ADDON_VOICEOVER": D(str(cfg["voiceover"])),
-        "ADDON_BUNDLES": tuple({**x, "price": D(str(x["price"])), "was": D(str(x["was"]))} for x in cfg["addon_bundles"]),
+        "ADDON_BUNDLES": tuple({**x, "price": D(str(x["price"])), "was": D(str(x["was"])),
+                                "items": tuple(x.get("items") or bundle_items_from_title(str(x.get("title") or "")))}
+                               for x in cfg["addon_bundles"]),
     }
 
 
@@ -275,9 +304,12 @@ def validate(raw: dict) -> dict:
 
     clean_ab = []
     for x in cfg["addon_bundles"]:
+        items = [c for c in (x.get("items") or []) if c in clean_addons] or bundle_items_from_title(str(x.get("title") or ""))
+        if len(items) > 6:
+            raise ValueError("باقة إضافات: حتى 6 عناصر")
         clean_ab.append({"title": str(x.get("title") or "")[:40],
                          "price": str(_dec(x["price"], "سعر باقة إضافات", D("0"), D("10000"))),
-                         "was": str(_dec(x["was"], "السعر قبل الخصم", D("0"), D("10000")))})
+                         "was": str(_dec(x["was"], "السعر قبل الخصم", D("0"), D("10000"))), "items": items})
 
     clean = {"meta": clean_meta, "packages": pkgs, "bundle": clean_bundle, "tg_ads": clean_tg, "tg_post": clean_tp,
              "addons": clean_addons, "voiceover": str(_dec(cfg["voiceover"], "التعليق الصوتي", D("0"), D("1000"))),

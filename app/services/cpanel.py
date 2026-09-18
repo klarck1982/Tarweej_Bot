@@ -82,6 +82,8 @@ GENERAL_DEFAULTS: dict[str, Any] = {
     "maintenance": False,
     "maintenance_msg": "نقوم بتحديث سريع — نعود خلال ساعة. شكراً لصبركم 🙏",
     "disabled_style": "lock",          # lock = زر بشارة قريباً | hide = يختفي
+    "design_approve_hours": 48,        # 🎨 الاعتماد التلقائي بعد التسليم إن صمت العميل (ساعات)
+    "design_revision_pct": "30",       # 🎨 رسم التعديل بعد المجاني (% من سعر الخدمة)
 }
 
 
@@ -178,6 +180,18 @@ def validate_general(raw: dict) -> dict:
     out["maintenance"] = bool(raw.get("maintenance", False))
     out["maintenance_msg"] = str(raw.get("maintenance_msg") or GENERAL_DEFAULTS["maintenance_msg"])[:300]
     out["disabled_style"] = "hide" if raw.get("disabled_style") == "hide" else "lock"
+    try:
+        ah_raw = raw.get("design_approve_hours")
+        ah = int(Decimal(str(ah_raw if ah_raw not in (None, "") else 48)))
+        if not 1 <= ah <= 240:
+            raise InvalidOperation
+        out["design_approve_hours"] = ah
+        pct = Decimal(str(raw.get("design_revision_pct") if raw.get("design_revision_pct") not in (None, "") else "30"))
+        if not 0 <= pct <= 100:
+            raise InvalidOperation
+        out["design_revision_pct"] = str(pct.quantize(Decimal("1")) if pct == pct.to_integral() else pct.quantize(Decimal("0.1")))
+    except (InvalidOperation, ValueError):
+        raise ValueError("إعدادات التصميم: الاعتماد التلقائي بين 1 و 240 ساعة، ورسم التعديل بين 0 و 100%") from None
     return out
 
 
@@ -316,11 +330,15 @@ async def stats(period: str = "7d") -> dict:
     prev_rev = Decimal(prev["revenue"])
     growth = None if prev_rev == 0 else int((revenue - prev_rev) / prev_rev * 100)
     by_status = {r["status"]: r["n"] for r in await db.fetch("SELECT status, count(*) AS n FROM orders GROUP BY status")}
-    open_n = await db.fetchval("SELECT count(*) FROM orders WHERE status IN ('paid','submitting','submitted','in_progress','active','paused','needs_revision','failed_submit')") or 0
+    open_n = await db.fetchval("SELECT count(*) FROM orders WHERE status IN ('paid','submitting','submitted','in_progress','active','paused','needs_revision','failed_submit','delivered')") or 0
     pending_topups = await db.fetchval("SELECT count(*) FROM topups WHERE status='pending'") or 0
     new_orders = by_status.get("submitted", 0) + by_status.get("paid", 0)
     awaiting_text = by_status.get("needs_revision", 0)
     posts_waiting = await db.fetchval("SELECT count(*) FROM orders WHERE kind = 'tg_post' AND status IN ('submitted','in_progress')") or 0
+    design_working = await db.fetchval(
+        "SELECT count(*) FROM orders WHERE kind = 'design' AND status IN ('submitted','in_progress','needs_revision')") or 0
+    design_late = await db.fetchval(
+        "SELECT count(*) FROM orders WHERE kind = 'design' AND status IN ('submitted','in_progress','needs_revision') AND due_at < now()") or 0
     liabilities = await db.fetchval("SELECT coalesce(sum(balance_usd),0) FROM users") or 0
     topups_period = await db.fetchval("SELECT coalesce(sum(amount_usd),0) FROM topups WHERE status='approved' AND decided_at >= $1", since) or 0
     # الإيراد اليومي لآخر 7 أيام (للرسم)
@@ -333,7 +351,8 @@ async def stats(period: str = "7d") -> dict:
         d = (datetime.now(timezone.utc) - timedelta(days=i)).date().isoformat()
         chart.append({"d": d, "v": dmap.get(d, 0.0)})
     top = await db.fetch(
-        f"SELECT kind, coalesce(spec->>'pkg','') AS pkg, count(*) AS n FROM orders WHERE {paid} AND created_at >= $1 "
+        f"SELECT kind, CASE WHEN kind = 'design' THEN coalesce(spec->>'title','') ELSE coalesce(spec->>'pkg','') END AS pkg, "
+        f"count(*) AS n FROM orders WHERE {paid} AND created_at >= $1 "
         f"GROUP BY 1,2 ORDER BY n DESC LIMIT 5", since)
     top_services = [{"label": _service_label(r["kind"], r["pkg"]), "n": r["n"]} for r in top]
     nour_balance = None
@@ -348,7 +367,8 @@ async def stats(period: str = "7d") -> dict:
         "orders": row["n"], "orders_open": open_n, "revenue": float(revenue), "cost": float(cost),
         "profit": float(revenue - cost), "margin_pct": (int((revenue - cost) / revenue * 100) if revenue else 0),
         "growth_pct": growth, "by_status": by_status, "pending_topups": pending_topups, "new_orders": new_orders,
-        "awaiting_text": awaiting_text, "posts_waiting": posts_waiting, "liabilities": float(liabilities), "topups_period": float(topups_period),
+        "awaiting_text": awaiting_text, "posts_waiting": posts_waiting,
+        "design_working": design_working, "design_late": design_late, "liabilities": float(liabilities), "topups_period": float(topups_period),
         "chart": chart, "top_services": top_services, "nour_balance": nour_balance,
         "nour_dry": _nour_dry(),
     }
@@ -367,7 +387,9 @@ def _service_label(kind: str, pkg: str) -> str:
         if p:
             return f"📢 Meta — {p.emoji} {p.title}"
         return "📢 Meta — 📦 انطلاقة متجر" if pkg == "bundle" else "📢 Meta — 🛠️ مخصص"
-    names = {"copy": "✍️ نص إعلاني", "design": "🖼️ تصميم صورة", "reel": "🎬 ريل", "montage": "🎞️ مونتاج", "tg_post": "📝 قنوات شريكة"}
+    if kind == "design":
+        return "🎨 تصميم — " + (pkg or "خدمة")
+    names = {"copy": "✍️ نص إعلاني", "reel": "🎬 ريل", "montage": "🎞️ مونتاج", "tg_post": "📝 قنوات شريكة"}
     return names.get(kind, kind)
 
 

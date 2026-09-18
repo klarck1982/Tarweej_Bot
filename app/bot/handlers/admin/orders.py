@@ -508,3 +508,190 @@ async def msg_tgp_text(message: Message, state: FSMContext) -> None:
     except Exception:  # noqa: BLE001
         pass
     await ON.refresh_admin_cards(message.bot, o["id"])
+
+
+# ═══════════════════════════ 🎨 مهام التصميم (v0.8.0) ═══════════════════════════
+# ▶️ بدأت العمل → 📤 تسليم (ملفات + تعليق ثم «أرسل للعميل») → العميل يعتمد/يطلب تعديلاً → ✅
+# ❌ تعذّر التنفيذ = استرداد كامل بسبب يصل العميل. كل الإدخالات في خاصّ الأدمن (C.ask_input).
+
+from app.services import design as DS  # noqa: E402
+
+
+class AdminDesign(StatesGroup):
+    deliver = State()       # يجمع ملفات التسليم + تعليقاً
+    reject = State()        # سبب تعذّر التنفيذ
+
+
+async def _ds_order(cb: CallbackQuery, oid: int, statuses: tuple[str, ...]) -> dict | None:
+    o = await repo.get(oid)
+    if not o or o.get("kind") != "design":
+        await cb.answer()
+        return None
+    if o["status"] not in statuses:
+        await cb.answer("هذا الإجراء غير متاح من الحالة الحالية", show_alert=True)
+        await ON.refresh_admin_cards(cb.bot, oid)
+        return None
+    return o
+
+
+@router.callback_query(F.data.regexp(r"^adm:ds:(\d+):start$"))
+async def cb_ds_start(cb: CallbackQuery) -> None:
+    oid = int(cb.data.split(":")[2])
+    if not await _ds_order(cb, oid, ("submitted",)):
+        return
+    o = await DS.start(oid, cb.from_user.id)
+    if not o:
+        await cb.answer("تغيّرت حالة الطلب", show_alert=True)
+        return
+    await cb.answer(T.ADMIN_DS_STARTED.format(id=oid))
+    await ON.push_user_status(cb.bot, o)
+    await ON.refresh_admin_cards(cb.bot, oid)
+
+
+@router.callback_query(F.data.regexp(r"^adm:ds:(\d+):deliver$"))
+async def cb_ds_deliver(cb: CallbackQuery, state: FSMContext) -> None:
+    oid = int(cb.data.split(":")[2])
+    if await _ds_order(cb, oid, DS.WORKING):
+        await C.ask_input(cb, state, AdminDesign.deliver, {"oid": oid, "files": [], "text": None},
+                          T.ADMIN_DS_ASK_DELIVER.format(id=oid), K.admin_deliver_step(oid, False))
+
+
+def _file_from(message: Message) -> tuple[str, str] | None:
+    if message.document:
+        return ("document", message.document.file_id)
+    if message.photo:
+        return ("photo", message.photo[-1].file_id)
+    if message.video:
+        return ("video", message.video.file_id)
+    if message.animation:
+        return ("video", message.animation.file_id)
+    if message.audio:
+        return ("audio", message.audio.file_id)
+    if message.voice:
+        return ("audio", message.voice.file_id)
+    return None
+
+
+@router.message(AdminDesign.deliver, F.document | F.photo | F.video | F.animation | F.audio | F.voice)
+async def msg_ds_deliver_file(message: Message, state: FSMContext) -> None:
+    data = await state.get_data()
+    files = list(data.get("files") or [])
+    f = _file_from(message)
+    if not f:
+        return
+    if len(files) >= 10:
+        await message.answer("الحد 10 ملفات لكل تسليم — اضغط «✅ أرسل للعميل».")
+        return
+    files.append(list(f))
+    text = data.get("text")
+    if message.caption and not text:
+        text = " ".join(message.caption.split())[:1000]
+    await state.update_data(files=files, text=text)
+    if message.media_group_id and data.get("last_group") == message.media_group_id:
+        return
+    await state.update_data(last_group=message.media_group_id)
+    await message.answer(T.ADMIN_DS_DELIVER_GOT.format(n=len(files), text=f" + تعليق «{T.esc(text[:40])}…»" if text else ""),
+                         reply_markup=K.admin_deliver_step(data["oid"], True))
+
+
+@router.message(AdminDesign.deliver, F.text)
+async def msg_ds_deliver_text(message: Message, state: FSMContext) -> None:
+    if message.text.startswith("/") or message.text in T.MAIN_BUTTONS:
+        await state.clear()
+        return
+    data = await state.get_data()
+    text = " ".join(message.text.split())[:1000]
+    await state.update_data(text=text)
+    n = len(data.get("files") or [])
+    await message.answer(T.ADMIN_DS_DELIVER_GOT.format(n=n, text=f" + تعليق «{T.esc(text[:40])}…»") if n else
+                         "📝 حُفظ التعليق — " + T.ADMIN_DS_DELIVER_EMPTY, reply_markup=K.admin_deliver_step(data["oid"], n > 0))
+
+
+@router.callback_query(AdminDesign.deliver, F.data.regexp(r"^adm:ds:(\d+):send$"))
+async def cb_ds_send(cb: CallbackQuery, state: FSMContext) -> None:
+    oid = int(cb.data.split(":")[2])
+    data = await state.get_data()
+    files = data.get("files") or []
+    if int(data.get("oid") or 0) != oid:
+        await cb.answer("انتهت الجلسة — ابدأ التسليم من بطاقة الطلب", show_alert=True)
+        await state.clear()
+        return
+    if not files:
+        await cb.answer(T.ADMIN_DS_DELIVER_EMPTY, show_alert=True)
+        return
+    await state.clear()
+    o = await DS.deliver(oid, cb.from_user.id, files, data.get("text"))
+    if not o:
+        await cb.answer("لم يُنفَّذ — الطلب تغيّرت حالته.", show_alert=True)
+        return
+    try:
+        await cb.message.edit_reply_markup(reply_markup=None)
+    except Exception:  # noqa: BLE001
+        pass
+    ok = await ON.push_delivery(cb.bot, o)
+    msg = T.ADMIN_DS_DELIVERED_OK.format(id=oid, n=len(files), hours=DS.approve_hours())
+    if not ok:
+        msg += "\n⚠️ تعذّر إيصال الرسالة للعميل (ربما حظر البوت) — التسليم محفوظ في الطلب."
+    await cb.message.answer(msg)
+    await cb.answer("📤 سُلّم")
+    await ON.refresh_admin_cards(cb.bot, oid)
+
+
+@router.callback_query(F.data.regexp(r"^adm:ds:(\d+):send$"))
+async def cb_ds_send_stale(cb: CallbackQuery) -> None:
+    await cb.answer("انتهت جلسة التسليم — اضغط 📤 تسليم من بطاقة الطلب من جديد", show_alert=True)
+
+
+@router.callback_query(F.data.regexp(r"^adm:ds:(\d+):approve$"))
+async def cb_ds_approve(cb: CallbackQuery) -> None:
+    oid = int(cb.data.split(":")[2])
+    if not await _ds_order(cb, oid, ("delivered",)):
+        return
+    o = await DS.approve(oid, None, admin_id=cb.from_user.id)
+    if not o:
+        await cb.answer("تغيّرت حالة الطلب", show_alert=True)
+        return
+    await cb.answer("✅ اعتُمد")
+    try:
+        await cb.bot.send_message(o["user_id"], T.DS_APPROVED.format(id=oid), reply_markup=K.ds_order_view({**o, "media_count": 0}))
+    except Exception:  # noqa: BLE001
+        pass
+    await ON.refresh_admin_cards(cb.bot, oid)
+
+
+@router.callback_query(F.data.regexp(r"^adm:ds:(\d+):files$"))
+async def cb_ds_files(cb: CallbackQuery) -> None:
+    oid = int(cb.data.split(":")[2])
+    o = await repo.get(oid)
+    if not o or o.get("kind") != "design":
+        await cb.answer()
+        return
+    dest = cb.from_user.id if C.in_channel(cb) else cb.message.chat.id
+    n = 0
+    for d in (o.get("delivery") or []):
+        n += await ON.send_delivery_files(cb.bot, dest, o, d)
+    await cb.answer(f"📥 {n} ملف" + (" — في خاصّك" if C.in_channel(cb) else "") if n else "لا تسليمات بعد")
+
+
+@router.callback_query(F.data.regexp(r"^adm:ds:(\d+):reject$"))
+async def cb_ds_reject(cb: CallbackQuery, state: FSMContext) -> None:
+    oid = int(cb.data.split(":")[2])
+    if await _ds_order(cb, oid, DS.OPEN):
+        await C.ask_input(cb, state, AdminDesign.reject, {"oid": oid}, T.ADMIN_DS_ASK_REJECT.format(id=oid), K.cancel_input("adm:cancel_input"))
+
+
+@router.message(AdminDesign.reject, F.text)
+async def msg_ds_reject(message: Message, state: FSMContext) -> None:
+    if message.text.startswith("/") or message.text in T.MAIN_BUTTONS:
+        await state.clear()
+        return
+    data = await state.get_data()
+    await state.clear()
+    reason = message.text.strip()[:300]
+    o = await DS.reject(data["oid"], message.from_user.id, reason)
+    if not o:
+        await message.answer("لم يُنفَّذ — الطلب تغيّرت حالته.")
+        return
+    await message.answer(f"❌ #ORD-{o['id']} — استُرد {fmt(o['refunded_usd'])} للعميل وأُبلغ.")
+    await ON.push_user_status(message.bot, o, reason=reason)
+    await ON.refresh_admin_cards(message.bot, o["id"])

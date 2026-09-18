@@ -124,14 +124,7 @@ async def cb_ai_reel(cb: CallbackQuery) -> None:
     await cb.answer(T.COMING_STEP.format(step=6).replace("<b>", "").replace("</b>", ""), show_alert=True)
 
 
-@router.callback_query(F.data.startswith("add:svc:"))
-async def cb_addon(cb: CallbackQuery) -> None:
-    svc = await settings_repo.services()
-    if not svc["addons"]:
-        await cb.answer(T.LOCKED_SERVICE, show_alert=True)
-        return
-    await events.log_event("addon_click", cb.from_user.id, svc=cb.data.split(":")[-1])
-    await cb.answer(T.COMING_STEP.format(step=6).replace("<b>", "").replace("</b>", ""), show_alert=True)
+# add:svc:copy|design|reel|montage|bundles → design_wizard (v0.8.0)
 
 
 # ───────────── 💬 الدعم ─────────────

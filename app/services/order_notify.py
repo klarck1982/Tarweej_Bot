@@ -33,6 +33,8 @@ def pkg_label(spec: dict) -> str:
         return f"📣 تيليغرام {fmt(spec.get('budget', 0))}"
     if spec.get("kind") == "tg_post":
         return f"📝 {str(spec.get('channel_title') or 'قناة')[:14]}"
+    if spec.get("kind") == "design":
+        return f"🎨 {str(spec.get('title') or 'تصميم')[:16]}"
     code = spec.get("pkg")
     if code in P.META_BY_CODE:
         p = P.META_BY_CODE[code]
@@ -127,7 +129,46 @@ async def admin_tgp_card_text(order: dict, media_count: int) -> str:
     )
 
 
+async def admin_ds_card_text(order: dict, media_count: int) -> str:
+    """بطاقة مهمة التصميم عند الأدمن — نفس أسطر ملخص العميل + المهلة والتسليمات والتعديل."""
+    from app.services import design as DS
+    spec = order["spec"]
+    uname = f"@{order['user_username']}" if order.get("user_username") else ""
+    lines = DS.spec_lines(spec, esc)
+    # الرسالة كاملة بصيغة قابلة للنسخ (المصمم ينسخها)
+    lines = [ln if not ln.startswith("✍️") else T.ADMIN_DS_MESSAGE_LINE.format(text=esc(spec.get("message"))) for ln in lines]
+    if media_count:
+        lines.append(f"📎 ملفات العميل: {media_count} (أعلاه / زر 🖼️)")
+    urg = DS.urgency(order)
+    urgent = f" {urg}" if urg else ""
+    delivered = ""
+    for d in (order.get("delivery") or []):
+        try:
+            at = _when(datetime.fromisoformat(d.get("at")))
+        except Exception:  # noqa: BLE001
+            at = "—"
+        delivered += T.ADMIN_DS_DELIVERED_LINE.format(n=d.get("n", "?"), at=at, files=f"{len(d.get('files') or [])} ملف")
+    revision = ""
+    if order.get("revision_note") and order["status"] in ("needs_revision", "delivered", "completed"):
+        rc = int(order.get("revision_count") or 0)
+        kind = "مجاني" if rc <= DS.FREE_REVISIONS else f"مدفوع — {rc - DS.FREE_REVISIONS}"
+        revision = T.ADMIN_DS_REVISION_LINE.format(kind=kind, text=esc(order["revision_note"]))
+    if order["status"] == "delivered":
+        due, left = _when(order.get("approve_by")), "اعتماد تلقائي " + DS.left_label(order.get("approve_by"))
+    else:
+        due, left = _when(order.get("due_at")), DS.left_label(order.get("due_at"))
+    note = f"\n📌 <i>{esc(order['note'])}</i>" if order.get("note") and order["status"] in ("rejected", "cancelled", "refunded") else ""
+    return T.ADMIN_DS_CARD.format(
+        icon=orders_svc.status_icon(order), id=order["id"], status=DS.ADMIN_STATUS_NAME.get(order["status"], order["status"]),
+        urgent=urgent, name=esc(order.get("user_name")), username=esc(uname), uid=order["user_id"], lines="\n".join(lines),
+        due=due, left=left, delivered=delivered, revision=revision, price=fmt(order["price_usd"]),
+        created=_when(order.get("paid_at") or order.get("created_at")), note=note,
+    )
+
+
 def admin_card_kb(order: dict, media_count: int, in_channel: bool):
+    if order.get("kind") == "design":
+        return K.admin_ds_card(order, media_count, in_channel=in_channel)
     if order.get("kind") == "tg_ads":
         return K.admin_tga_card(order, in_channel=in_channel)
     if order.get("kind") == "tg_post":
@@ -136,6 +177,8 @@ def admin_card_kb(order: dict, media_count: int, in_channel: bool):
 
 
 async def admin_card_text(order: dict, media_count: int) -> str:
+    if order.get("kind") == "design":
+        return await admin_ds_card_text(order, media_count)
     if order.get("kind") == "tg_ads":
         return await admin_tga_card_text(order)
     if order.get("kind") == "tg_post":
@@ -174,7 +217,7 @@ async def notify_admins_new_order(bot: Bot, order_id: int) -> None:
     targets = await channels.chat_ids_for("orders")
     to_channel = bool(targets) and channels.is_channel_chat(targets[0])
     kb = admin_card_kb(order, media_count, to_channel)
-    if order.get("kind") == "tg_post" and media_count:
+    if order.get("kind") in ("tg_post", "design") and media_count:
         await _forward_media(bot, order_id, targets)
     msg_ids = await channels.send(bot, "orders", text, kb)
     if msg_ids:
@@ -246,6 +289,20 @@ async def push_user_status(bot: Bot, order: dict, reason: str | None = None) -> 
     st = order["status"]
     balance = await users_repo.get_balance(order["user_id"])
     kb = K.order_view({**order, "media_count": 0})
+    if order.get("kind") == "design":
+        from app.services import design as DS
+        tpl = T.DS_STATUS_PUSH.get(st)
+        if not tpl:
+            return
+        kb = K.ds_order_view({**order, "media_count": 0})
+        text = tpl.format(id=order["id"], due=_when(order.get("due_at")), reason=esc(reason or order.get("note") or "—"),
+                          price=fmt(order.get("refunded_usd") or order["price_usd"]), balance=fmt(balance),
+                          hours=DS.approve_hours())
+        try:
+            await bot.send_message(order["user_id"], text, reply_markup=kb)
+        except Exception as e:  # noqa: BLE001
+            log.warning("cannot push status to user %s: %s", order["user_id"], e)
+        return
     if order.get("kind") == "tg_post":
         from app.services import partner_posts as PP
         tpl = T.TGP_STATUS_PUSH.get(st)
@@ -285,3 +342,49 @@ async def push_user_status(bot: Bot, order: dict, reason: str | None = None) -> 
         await bot.send_message(order["user_id"], text, reply_markup=kb)
     except Exception as e:  # noqa: BLE001 — حظر البوت
         log.warning("cannot push status to user %s: %s", order["user_id"], e)
+
+
+# ───────────── 🎨 التسليم للعميل ─────────────
+
+async def send_delivery_files(bot: Bot, chat_id: int, order: dict, delivery: dict | None = None) -> int:
+    """يرسل ملفات آخر تسليم (أو تسليم محدد) إلى chat_id — الصور كملفات تبقى بجودتها. يعيد عدد الملفات المرسلة."""
+    from app.services import design as DS
+    d = delivery or DS.last_delivery(order)
+    if not d:
+        return 0
+    n = 0
+    for f in d.get("files") or []:
+        kind, file_id = f[0], f[1]
+        try:
+            cap = f"#ORD-{order['id']}"
+            if kind == "photo":
+                await bot.send_photo(chat_id, file_id, caption=cap)
+            elif kind == "video":
+                await bot.send_video(chat_id, file_id, caption=cap)
+            elif kind == "audio":
+                await bot.send_audio(chat_id, file_id, caption=cap)
+            else:
+                await bot.send_document(chat_id, file_id, caption=cap)
+            n += 1
+        except Exception as e:  # noqa: BLE001
+            log.warning("deliver file ORD-%s to %s failed: %s", order["id"], chat_id, e)
+    return n
+
+
+async def push_delivery(bot: Bot, order: dict) -> bool:
+    """📤 بعد تسليم الأدمن: الملفات ثم رسالة «اعتمده / تعديل» للعميل."""
+    from app.services import design as DS
+    d = DS.last_delivery(order)
+    if not d:
+        return False
+    n = await send_delivery_files(bot, order["user_id"], order, d)
+    nth = T.DS_DELIVERED_NTH.format(n=d.get("n")) if int(d.get("n") or 1) > 1 else ""
+    files = f"📎 {n} ملف أعلاه." if n else "📎 <i>الملفات في رسائل الفريق أعلاه.</i>"
+    note = T.DS_DELIVERED_NOTE.format(text=esc(d.get("text"))) if d.get("text") else ""
+    text = T.DS_DELIVERED.format(id=order["id"], nth=nth, files=files, note=note, hours=DS.approve_hours())
+    try:
+        await bot.send_message(order["user_id"], text, reply_markup=K.ds_delivered(order["id"], DS.next_revision_is_free(order)))
+        return True
+    except Exception as e:  # noqa: BLE001
+        log.warning("cannot push delivery to user %s: %s", order["user_id"], e)
+        return False

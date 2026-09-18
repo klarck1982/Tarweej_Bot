@@ -304,7 +304,7 @@ def info_back(start_cta: bool = False) -> InlineKeyboardMarkup:
 # ───────────── A0 الأدمن ─────────────
 
 def admin_panel(topups: int = 0, tasks: int = 0, tickets: int = 0, orders: int = 0, attention: int = 0,
-                cpanel_url: str | None = None) -> InlineKeyboardMarkup:
+                cpanel_url: str | None = None, late: int = 0) -> InlineKeyboardMarkup:
     def n(x: int) -> str:
         return f" ({x})" if x else ""
     rows = []
@@ -314,7 +314,7 @@ def admin_panel(topups: int = 0, tasks: int = 0, tickets: int = 0, orders: int =
         [ib(f"📥 شحن معلّق{n(topups)}", "adm:topups", "primary" if topups else None)],
         [ib(f"📦 الطلبات المفتوحة{n(orders)}" + (f" · 🔔 {attention}" if attention else ""), "adm:orders",
             "primary" if attention else None)],
-        [ib(f"🛠️ مهام يدوية{n(tasks)}", "adm:tasks", "primary" if tasks else None)],
+        [ib(f"🛠️ مهام يدوية{n(tasks)}" + (f" · 🔴 {late}" if late else ""), "adm:tasks", "danger" if late else ("primary" if tasks else None))],
         [ib(f"🎫 تذاكر{n(tickets)}", "adm:tickets", "primary" if tickets else None)],
         [ib("📊 إحصائيات", "adm:stats")],
         [ib("📣 بث رسالة", "adm:bc")],
@@ -948,3 +948,194 @@ def admin_tgp_card(order: dict, media_count: int = 0, in_channel: bool = False) 
     if not in_channel:
         rows.append([ib("◀️ الطلبات", "adm:orders")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+# ═══════════════════════════ الخطوة 6 — 🎨 معالج التصميم (D0–D9) ═══════════════════════════
+
+def _ds_nav(back: str | None = None) -> list[list[InlineKeyboardButton]]:
+    return _nav(back, cancel="ds:cancel")
+
+
+def ds_bundles(bundles: list[tuple[int, str]]) -> InlineKeyboardMarkup:
+    rows = [[ib(label, f"ds:bundle:{i}", "primary")] for i, label in bundles]
+    rows.append([ib("◀️ رجوع", "nav:design")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def ds_business(items: tuple, back: str) -> InlineKeyboardMarkup:
+    b = InlineKeyboardBuilder()
+    for code, name in items:
+        b.add(ib(name, f"ds:biz:{code}"))
+    b.adjust(2)
+    for row in _ds_nav(back):
+        b.row(*row)
+    return b.as_markup()
+
+
+def ds_message_step(back: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=_ds_nav(back))
+
+
+def ds_media(n: int, enough: bool, back: str) -> InlineKeyboardMarkup:
+    rows = []
+    if n and enough:
+        rows.append([ib("✅ تم — أرسلت كل شي", "ds:media:done", "success")])
+    elif n:
+        rows.append([ib("✅ تم — أكمِلوا بما أرسلت", "ds:media:done", "success")])
+    rows.append([ib("🚫 ما عندي مواد — استخدموا صوراً جاهزة", "ds:media:none")])
+    if n:
+        rows.append([ib("🗑️ حذف المرفقات", "ds:media:clear")])
+    rows += _ds_nav(back)
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def ds_brand(saved: bool, got: bool, back: str) -> InlineKeyboardMarkup:
+    rows = []
+    if got:
+        rows.append([ib("✅ تم — التالي", "ds:brand:done", "success")])
+    if saved and not got:
+        rows.append([ib("✅ استخدم هويتي المحفوظة", "ds:brand:saved", "success")])
+    rows.append([ib("⏭️ ما في لوغو — اختاروا أنتم", "ds:brand:skip")])
+    rows += _ds_nav(back)
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def ds_lang(langs: tuple, tones: tuple, lang: str, tone: str, back: str) -> InlineKeyboardMarkup:
+    rows = []
+    row = [ib(("✅ " if code == lang else "") + name, f"ds:lang:{code}", "primary" if code == lang else None) for code, name in langs]
+    rows.append(row[:2])
+    rows.append(row[2:])
+    rows.append([ib(("✅ " if code == tone else "") + name, f"ds:tone:{code}", "primary" if code == tone else None) for code, name in tones])
+    rows.append([ib("✅ التالي", "ds:lang:done", "success")])
+    rows += _ds_nav(back)
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def ds_extras(extras: tuple, selected: list[str], vo_price: str, back: str) -> InlineKeyboardMarkup:
+    rows = []
+    for code, name, paid in extras:
+        on = code in selected
+        label = ("✅ " if on else "☐ ") + name + (f" +{vo_price}" if paid else "")
+        rows.append([ib(label, f"ds:extra:{code}", "success" if on else None)])
+    rows.append([ib("✅ تم", "ds:extras:done", "primary")])
+    rows += _ds_nav(back)
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def ds_notes(back: str) -> InlineKeyboardMarkup:
+    rows = [[ib("⏭️ بلا ملاحظات — إلى الملخص", "ds:notes:skip", "primary")]]
+    rows += _ds_nav(back)
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def ds_summary(price_ok: bool, price: str, gap: str | None = None) -> InlineKeyboardMarkup:
+    rows = []
+    if price_ok:
+        rows.append([ib(f"✅ تأكيد ودفع {price}", "ds:confirm", "success")])
+    else:
+        rows.append([ib(f"➕ اشحن {gap} وأكمل", "meta:topup_gap", "success")])
+    rows.append([ib("✏️ تعديل خطوة", "ds:edit")])
+    rows.append([ib("❌ إلغاء", "ds:cancel", "danger")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def ds_edit_menu(has_media: bool, has_video: bool) -> InlineKeyboardMarkup:
+    rows = [[ib("🏷️ النشاط", "ds:back:biz"), ib("✍️ الرسالة", "ds:back:msg")]]
+    second = [ib("🎨 الهوية", "ds:back:brand")]
+    if has_media:
+        second.insert(0, ib("📎 المواد", "ds:back:media"))
+    rows.append(second)
+    third = [ib("🗣️ اللغة والنبرة", "ds:back:lang"), ib("📝 الملاحظات", "ds:back:notes")]
+    if has_video:
+        third.insert(1, ib("🎬 الإضافات", "ds:back:extras"))
+    rows.append(third)
+    rows.append([ib("◀️ رجوع للملخص", "ds:back:summary")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def ds_done(order_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [ib("📦 متابعة الطلب", f"ord:view:{order_id}", "primary")],
+        [ib("🏠 القائمة", "nav:home")],
+    ])
+
+
+def ds_order_view(order: dict) -> InlineKeyboardMarkup:
+    """بطاقة طلب التصميم عند العميل."""
+    st, oid = order["status"], order["id"]
+    rows = []
+    if st == "delivered":
+        rows.append([ib("✅ ممتاز — اعتمده", f"ds:approve:{oid}", "success")])
+        rows.append([ib("✏️ طلب تعديل", f"ds:revise:{oid}")])
+    if st in ("delivered", "completed") and order.get("delivery"):
+        rows.append([ib("📥 أعد إرسال الملفات", f"ds:files:{oid}")])
+    if st == "submitted":
+        rows.append([ib("🚫 إلغاء واسترداد (مجاني قبل بدء العمل)", f"ds:cancel_order:{oid}", "danger")])
+    if st in ("completed", "rejected", "cancelled", "refunded"):
+        rows.append([ib("🎨 اطلب تصميماً جديداً", "nav:design", "primary")])
+    if order.get("media_count"):
+        rows.append([ib("🖼️ عرض ملفاتي", f"ord:media:{oid}")])
+    rows.append([ib("💬 مساعدة بهذا الطلب", f"ord:help:{oid}")])
+    rows.append([ib("◀️ طلباتي", "ord:list:1"), ib("🏠 القائمة", "nav:home")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def ds_delivered(order_id: int, free: bool) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [ib("✅ ممتاز — اعتمده", f"ds:approve:{order_id}", "success")],
+        [ib("✏️ طلب تعديل (مجاني × 1)" if free else "✏️ طلب تعديل (مدفوع)", f"ds:revise:{order_id}")],
+        [ib("🆘 مشكلة بهذا الطلب", f"ord:help:{order_id}")],
+    ])
+
+
+def ds_cancel_confirm(order_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [ib("✅ نعم، ألغِ واسترد", f"ds:cancel_yes:{order_id}", "danger")],
+        [ib("◀️ رجوع", f"ord:view:{order_id}")],
+    ])
+
+
+def ds_revision_confirm(order_id: int, fee: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [ib(f"✅ تأكيد ودفع {fee}", f"ds:revise_pay:{order_id}", "success")],
+        [ib("❌ إلغاء", f"ord:view:{order_id}", "danger")],
+    ])
+
+
+# ───────────── الأدمن — بطاقة مهمة التصميم + لوحة المهام ─────────────
+
+def admin_ds_card(order: dict, media_count: int = 0, in_channel: bool = False) -> InlineKeyboardMarkup:
+    oid, st = order["id"], order["status"]
+    rows = []
+    if st == "submitted":
+        rows.append([ib("▶️ بدأت العمل", f"adm:ds:{oid}:start", "primary")])
+    if st in ("submitted", "in_progress", "needs_revision"):
+        rows.append([ib("📤 تسليم النسخة المعدّلة ✍️" if st == "needs_revision" else "📤 تسليم — أرسل الملف ✍️", f"adm:ds:{oid}:deliver", "success")])
+    if st == "delivered":
+        rows.append([ib("✅ اعتماد بالنيابة عن العميل", f"adm:ds:{oid}:approve")])
+    if media_count:
+        rows.append([ib(f"📎 ملفات العميل ({media_count})", f"adm:ord:{oid}:media")])
+    if order.get("delivery"):
+        rows.append([ib("📥 ما سلّمته", f"adm:ds:{oid}:files")])
+    rows.append([ib("💬 مراسلة العميل", f"adm:ord:{oid}:msg")])
+    if st in ("submitted", "in_progress", "needs_revision", "delivered"):
+        rows.append([ib("❌ تعذّر التنفيذ — استرداد كامل", f"adm:ds:{oid}:reject", "danger")])
+    if not in_channel:
+        rows.append([ib("◀️ المهام", "adm:tasks")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def admin_deliver_step(order_id: int, ready: bool) -> InlineKeyboardMarkup:
+    rows = []
+    if ready:
+        rows.append([ib("✅ أرسل للعميل", f"adm:ds:{order_id}:send", "success")])
+    rows.append([ib("❌ إلغاء", "adm:cancel_input", "danger")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def admin_tasks_list(rows_data: list[tuple[int, str, str | None]]) -> InlineKeyboardMarkup:
+    b = InlineKeyboardBuilder()
+    for oid, label, style in rows_data:
+        b.row(ib(label, f"adm:ord:{oid}:view", style))
+    b.row(ib("🔄 تحديث", "adm:tasks"), ib("◀️ رجوع للوحة", "adm:panel"))
+    return b.as_markup()

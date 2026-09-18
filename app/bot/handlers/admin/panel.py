@@ -20,6 +20,7 @@ from app.db import pool as db
 from app.db.repo import events, settings as settings_repo
 from app.services import channels as CH
 from app.services import cpanel as CP
+from app.services import orders as orders_svc
 
 log = logging.getLogger("admin")
 router = Router(name="admin")
@@ -37,10 +38,12 @@ async def _counters() -> dict:
           (SELECT count(*) FROM users)                                              AS users,
           (SELECT count(*) FROM users  WHERE created_at >= date_trunc('day', now())) AS new_today,
           (SELECT count(*) FROM topups WHERE status = 'pending')                     AS topups,
-          (SELECT count(*) FROM tasks  WHERE status IN ('new','in_progress','revision')) AS tasks,
+          (SELECT count(*) FROM orders WHERE (kind = 'design' AND status IN ('submitted','in_progress','needs_revision'))
+                                          OR (kind IN ('tg_post','tg_ads') AND status IN ('submitted','in_progress'))) AS tasks,
+          (SELECT count(*) FROM orders WHERE kind = 'design' AND status IN ('submitted','in_progress','needs_revision') AND due_at < now()) AS tasks_late,
           (SELECT count(*) FROM tickets WHERE status = 'open')                       AS tickets,
           (SELECT count(*) FROM orders WHERE paid_at >= date_trunc('day', now())) AS orders_today,
-          (SELECT count(*) FROM orders WHERE status IN ('paid','submitted','in_progress','active','paused')) AS orders_open
+          (SELECT count(*) FROM orders WHERE status IN ('paid','submitted','in_progress','active','paused','needs_revision','delivered')) AS orders_open
         """
     )
     c = dict(row)
@@ -54,8 +57,9 @@ async def _panel_text() -> tuple[str, dict]:
     c = await _counters()
     from app.services import nour
     mode = f"{settings.mode} · {'🧪 محاكاة نور' if nour.is_dry_run() else '🟢 نور حقيقي'}"
+    tasks = str(c["tasks"]) + (f" (🔴 {c['tasks_late']} متأخر)" if c.get("tasks_late") else "")
     text = T.ADMIN_PANEL.format(version=VERSION, step=STEP, mode=mode, users=c["users"], new_today=c["new_today"],
-                                topups=c["topups"], tasks=c["tasks"], tickets=c["tickets"], orders_today=c["orders_today"])
+                                topups=c["topups"], tasks=tasks, tickets=c["tickets"], orders_today=c["orders_today"])
     return text, c
 
 
@@ -63,7 +67,8 @@ async def _panel_text() -> tuple[str, dict]:
 @router.message(F.text == T.BTN_ADMIN)
 async def cmd_admin(message: Message) -> None:
     text, c = await _panel_text()
-    await message.answer(text, reply_markup=K.admin_panel(c["topups"], c["tasks"], c["tickets"], c["orders_open"], c["attention"], CP.cpanel_url()))
+    await message.answer(text, reply_markup=K.admin_panel(c["topups"], c["tasks"], c["tickets"], c["orders_open"], c["attention"], CP.cpanel_url(),
+                                                          late=c.get("tasks_late", 0)))
 
 
 @router.message(Command("cpanel"))
@@ -79,7 +84,7 @@ async def cmd_cpanel(message: Message) -> None:
 async def cb_panel(cb: CallbackQuery, state: FSMContext) -> None:
     await state.clear()
     text, c = await _panel_text()
-    kb = K.admin_panel(c["topups"], c["tasks"], c["tickets"], c["orders_open"], c["attention"], CP.cpanel_url())
+    kb = K.admin_panel(c["topups"], c["tasks"], c["tickets"], c["orders_open"], c["attention"], CP.cpanel_url(), late=c.get("tasks_late", 0))
     try:
         await cb.message.edit_text(text, reply_markup=kb)
     except TelegramBadRequest as e:
@@ -125,10 +130,53 @@ async def cb_toggle_service(cb: CallbackQuery) -> None:
     await cb_settings(cb)
 
 
-@router.callback_query(F.data.in_({"adm:tasks", "adm:tickets", "adm:stats", "adm:bc", "adm:find"}))
+@router.callback_query(F.data.in_({"adm:tickets", "adm:bc", "adm:find"}))
 async def cb_soon(cb: CallbackQuery) -> None:
-    step = {"adm:tasks": 6, "adm:tickets": 6, "adm:stats": 6, "adm:bc": 6, "adm:find": 6}[cb.data]
-    await cb.answer(f"يُفعَّل في الخطوة {step} من 6", show_alert=True)
+    await cb.answer("يُفعَّل في الإصدار 0.8.1 (تذاكر + بث + بحث)", show_alert=True)
+
+
+@router.callback_query(F.data == "adm:stats")
+async def cb_stats(cb: CallbackQuery) -> None:
+    url = CP.cpanel_url()
+    if url:
+        await cb.message.answer("📊 الإحصائيات الكاملة (إيراد، ربح، رسم بياني، أعلى الخدمات) في Cpanel 👇", reply_markup=K.cpanel_open(url))
+        await cb.answer()
+    else:
+        await cb.answer("الإحصائيات في Cpanel — متاحة على الاستضافة فقط", show_alert=True)
+
+
+# ───────────── 🛠️ لوحة المهام اليدوية ─────────────
+
+async def tasks_view() -> tuple[str, object]:
+    from app.db.repo import orders as orders_repo
+    from app.services import design as DS, order_notify as ON
+    rows = await orders_repo.list_tasks()
+    if not rows:
+        return T.ADMIN_TASKS_EMPTY, K.admin_tasks_list([])
+    data = []
+    for o in rows:
+        urg = DS.urgency(o) if o.get("kind") == "design" else ""
+        if o.get("kind") == "design":
+            when = DS.left_label(o.get("due_at"))
+        elif o.get("scheduled_at"):
+            when = "📅 " + ON._when(o["scheduled_at"])
+        else:
+            when = "⚡"
+        icon = urg or orders_svc.status_icon(o)
+        label = f"{icon} #ORD-{o['id']} · {ON.pkg_label(o['spec'])} · {when} · {(o.get('user_name') or '')[:10]}"
+        data.append((o["id"], label[:64], "danger" if urg == "🔴" else ("primary" if urg == "🟠" else None)))
+    return T.ADMIN_TASKS_LIST.format(n=len(rows)), K.admin_tasks_list(data)
+
+
+@router.callback_query(F.data == "adm:tasks")
+async def cb_tasks(cb: CallbackQuery, state: FSMContext) -> None:
+    await state.clear()
+    text, kb = await tasks_view()
+    try:
+        await cb.message.edit_text(text, reply_markup=kb)
+    except Exception:  # noqa: BLE001
+        await cb.message.answer(text, reply_markup=kb)
+    await cb.answer()
 
 
 # ───────────── إلغاء إدخال نصي (يعمل من أي بطاقة) ─────────────

@@ -693,6 +693,11 @@ async def cb_resume(cb: CallbackQuery, state: FSMContext) -> None:
         await resume_post(cb, state, draft)
         await cb.answer()
         return
+    if draft.get("kind") == "design":
+        from app.bot.handlers.design_wizard import resume_draft as resume_design
+        await resume_design(cb, state, draft)
+        await cb.answer()
+        return
     await state.clear()
     await state.update_data(
         pkg=spec.get("pkg"), daily=spec["daily"], days=int(spec["days"]), platform=spec["platform"], goal=spec.get("goal"),

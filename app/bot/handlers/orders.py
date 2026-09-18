@@ -57,8 +57,31 @@ async def cb_orders(cb: CallbackQuery, state: FSMContext) -> None:
     await cb.answer()
 
 
+def ds_order_text(o: dict) -> str:
+    from app.services import design as DS
+    spec = o["spec"]
+    tl = []
+    if o.get("started_at"):
+        tl.append(f"بدأ العمل: {ON._when(o['started_at'])}")
+    if o.get("delivered_at"):
+        tl.append(f"سُلّم: {ON._when(o['delivered_at'])}")
+    if o.get("completed_at"):
+        tl.append(f"اعتُمد: {ON._when(o['completed_at'])}")
+    timeline = ("\n🕒 " + " · ".join(tl)) if tl else ""
+    rc = int(o.get("revision_count") or 0)
+    revs = f" · ✏️ تعديلات: {rc}" if rc else ""
+    hint = T.DS_HINTS.get(o["status"], T.ORDER_HINTS.get(o["status"], "")).format(due=ON._when(o.get("due_at")))
+    return T.ORDER_VIEW_DS.format(
+        icon=orders_svc.status_icon(o), id=o["id"], status=orders_svc.status_name(o),
+        lines="\n".join(DS.spec_lines(spec, ON.esc)), price=fmt(o["price_usd"]), revs=revs,
+        created=ON._when(o.get("created_at")), timeline=timeline, hint=hint,
+    )
+
+
 def order_text(o: dict) -> str:
     spec = o["spec"]
+    if o.get("kind") == "design":
+        return ds_order_text(o)
     if o.get("kind") == "tg_ads":
         return tga_order_text(o)
     if o.get("kind") == "tg_post":
@@ -134,6 +157,8 @@ def tgp_order_text(o: dict) -> str:
 
 
 def client_kb(o: dict):
+    if o.get("kind") == "design":
+        return K.ds_order_view(o)
     if o.get("kind") == "tg_post":
         return K.tgp_order_view(o)
     if o.get("kind") == "tg_ads" and o["status"] == "needs_revision":

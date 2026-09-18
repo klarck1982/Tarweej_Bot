@@ -21,6 +21,7 @@ from aiogram import Bot
 from app.config import settings
 from app.db.repo import orders as repo
 from app.services import nour, order_notify as ON, orders as orders_svc
+from app.services.pricing import fmt
 
 log = logging.getLogger("scheduler")
 
@@ -122,7 +123,40 @@ async def tick(bot: Bot) -> None:
     await _expire_drafts(bot)
     await _sync_open_orders(bot)
     await _partner_posts(bot)
+    await _design_tasks(bot)
     await _nour_health(bot)
+
+
+async def _design_tasks(bot: Bot) -> None:
+    """v0.8.0: تنبيهات مهل التصميم (اقترب/متأخر — مرة واحدة لكل) + الاعتماد التلقائي بعد صمت العميل."""
+    from app.bot import keyboards as K
+    from app.bot import texts as T
+    from app.services import design as DS, order_notify as ON
+    try:
+        soon, late = await DS.due_alerts()
+    except Exception as e:  # noqa: BLE001
+        log.warning("design due alerts failed: %s", e)
+        soon, late = [], []
+    for o in soon:
+        await ON.notify_admins_text(bot, T.ADMIN_DS_DUE_SOON.format(id=o["id"], title=T.esc(o["spec"].get("title")),
+                                                                    left=DS.left_label(o.get("due_at")), due=ON._when(o.get("due_at"))))
+    for o in late:
+        await ON.notify_admins_text(bot, T.ADMIN_DS_LATE.format(id=o["id"], title=T.esc(o["spec"].get("title")), due=ON._when(o.get("due_at"))))
+        await ON.refresh_admin_cards(bot, o["id"])
+    try:
+        approved = await DS.auto_approve_due()
+    except Exception as e:  # noqa: BLE001
+        log.warning("design auto-approve failed: %s", e)
+        approved = []
+    for o in approved:
+        hours = DS.approve_hours()
+        try:
+            await bot.send_message(o["user_id"], T.DS_AUTO_APPROVED.format(id=o["id"], hours=hours),
+                                   reply_markup=K.ds_order_view({**o, "media_count": 0}))
+        except Exception as e:  # noqa: BLE001
+            log.debug("auto-approve notice to %s failed: %s", o["user_id"], e)
+        await ON.notify_admins_text(bot, T.ADMIN_DS_AUTO_APPROVED_NOTICE.format(id=o["id"], hours=hours, price=fmt(o["price_usd"])))
+        await ON.refresh_admin_cards(bot, o["id"])
 
 
 async def _nour_health(bot: Bot) -> None:

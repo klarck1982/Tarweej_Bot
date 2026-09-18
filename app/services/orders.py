@@ -39,7 +39,7 @@ NOUR_TO_LOCAL = {
 }
 STATUS_ICON = {
     "awaiting_payment": "💤", "paid": "📨", "submitted": "🟡", "in_progress": "🔵", "active": "🟢",
-    "paused": "⏸️", "needs_revision": "✏️", "completed": "✅", "rejected": "❌", "failed_submit": "⚠️", "refunded": "↩️", "cancelled": "🚫",
+    "paused": "⏸️", "needs_revision": "✏️", "delivered": "📤", "completed": "✅", "rejected": "❌", "failed_submit": "⚠️", "refunded": "↩️", "cancelled": "🚫",
 }
 STATUS_NAME = {
     "awaiting_payment": "بانتظار الدفع", "paid": "قيد الإرسال", "submitted": "قيد المراجعة", "in_progress": "قيد التجهيز",
@@ -51,8 +51,8 @@ TG_ADS_STATUS_NAME = {
     "submitted": "قيد المراجعة", "in_progress": "أُنشئ — بمراجعة تيليغرام", "active": "يعمل الآن",
     "needs_revision": "النص يحتاج تعديلاً", "rejected": "رفضه تيليغرام — مُسترد",
 }
-KIND_NAME = {"meta_campaign": "إعلان فيسبوك/إنستغرام", "tg_ads": "إعلان Telegram Ads", "tg_post": "نشر في قناة شريكة"}
-KIND_EMOJI = {"meta_campaign": "📢", "tg_ads": "📣", "tg_post": "📝"}
+KIND_NAME = {"meta_campaign": "إعلان فيسبوك/إنستغرام", "tg_ads": "إعلان Telegram Ads", "tg_post": "نشر في قناة شريكة", "design": "تصميم وكتابة"}
+KIND_EMOJI = {"meta_campaign": "📢", "tg_ads": "📣", "tg_post": "📝", "design": "🎨"}
 # القنوات الشريكة: submitted 🟡 جديد · in_progress 📅 مجدول · active 🟢 منشور · completed ✅ انتهى
 TG_POST_STATUS_NAME = {
     "submitted": "جديد — بانتظار تأكيد الموعد", "in_progress": "مجدول", "active": "منشور الآن",
@@ -66,6 +66,9 @@ def status_name(order: dict) -> str:
         return TG_ADS_STATUS_NAME.get(st, STATUS_NAME.get(st, st))
     if order.get("kind") == "tg_post":
         return TG_POST_STATUS_NAME.get(st, STATUS_NAME.get(st, st))
+    if order.get("kind") == "design":
+        from app.services import design as DS
+        return DS.STATUS_NAME.get(st, STATUS_NAME.get(st, st))
     return STATUS_NAME.get(st, st)
 
 
@@ -88,6 +91,9 @@ def compute_prices(spec: dict) -> tuple[Decimal, Decimal, Decimal]:
     if spec.get("kind") == "tg_post":
         from app.services import partner_posts
         return partner_posts.compute_prices(spec)
+    if spec.get("kind") == "design":
+        from app.services import design
+        return design.compute_prices(spec)
     daily = Decimal(str(spec["daily"]))
     days = int(spec["days"])
     budget, price, cost = P.meta_custom_price(daily, days)
@@ -160,6 +166,11 @@ async def confirm(user_id: int, spec: dict, draft_id: int | None = None) -> dict
                     user_id, json.dumps(spec, ensure_ascii=False), price, cost, kind, init_status,
                 )
                 await c.execute("UPDATE orders SET idempotency_key = 'ord-' || id WHERE id = $1", row["id"])
+            if kind == "design":
+                # مهلة التسليم تبدأ لحظة الدفع (ساعات الخدمة الأطول في الطلب)
+                hours = int(spec.get("deliver_hours") or 24)
+                await c.execute("UPDATE orders SET due_at = now() + ($2 || ' hours')::interval, started_at = NULL WHERE id = $1",
+                                row["id"], str(hours))
             # الخصم — يرفع InsufficientBalance فتُلغى المعاملة كلها (الطلب لا يُنشأ)
             what = KIND_NAME.get(kind, kind) if manual else f"إعلان {TG.PLATFORM_NAME.get(spec.get('platform'), '')}"
             await money_svc.debit(user_id, price, "order_charge", ref_type="order", ref_id=row["id"],
