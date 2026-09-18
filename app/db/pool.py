@@ -44,6 +44,11 @@ async def init_pool(dsn: str) -> asyncpg.Pool:
                 max_size=3,
                 max_inactive_connection_lifetime=60,
                 command_timeout=30,
+                # Neon/رابط الـ pooler + ترحيلات ALTER TABLE لا ينسجمان مع
+                # prepared-statement cache: قد يبقى plan قديم لـ SELECT * بعد
+                # إضافة أعمدة (كما حدث عند تطبيق migration 008). إبقاء cache
+                # معطلاً آمن للخطة المجانية ويمنع خطأ InvalidCachedStatement.
+                statement_cache_size=0,
             )
             log.info("Postgres pool ready (attempt %s)", attempt)
             return _pool
@@ -74,6 +79,10 @@ _RETRYABLE = (
     asyncpg.exceptions.InterfaceError,
     asyncpg.exceptions.CannotConnectNowError,
     asyncpg.exceptions.AdminShutdownError,
+    # PostgreSQL قد يرفض plan قديمة في لحظة تغيير schema؛ مع cache=0
+    # لا يُفترض أن يتكرر، لكن إعادة المحاولة تجعل tick الحالي يتعافى أيضاً.
+    asyncpg.exceptions.InvalidCachedStatementError,
+    asyncpg.exceptions.OutdatedSchemaCacheError,
     ConnectionResetError,
     OSError,
 )
