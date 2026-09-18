@@ -65,6 +65,9 @@ def test_admin_search_and_broadcast_segments(loop, dbready):
     from app.db.repo import users
     _user(loop, 8101, "سامر", "samer_v081")
     assert loop.run_until_complete(users.admin_find("@samer_v081"))["tg_id"] == 8101
+    loop.run_until_complete(dbready.execute("UPDATE users SET username = '@samer_v081' WHERE tg_id = 8101"))
+    assert loop.run_until_complete(users.admin_find("samer_v081"))["tg_id"] == 8101
+    loop.run_until_complete(dbready.execute("UPDATE users SET username = 'samer_v081' WHERE tg_id = 8101"))
     assert loop.run_until_complete(users.admin_find("8101"))["tg_id"] == 8101
     oid = loop.run_until_complete(dbready.fetchval(
         "INSERT INTO orders (user_id, kind, status, spec, price_usd, cost_usd) VALUES ($1, 'copy', 'completed', '{}'::jsonb, 5, 0) RETURNING id", 8101

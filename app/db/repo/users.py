@@ -71,13 +71,17 @@ async def admin_find(term: str) -> dict | None:
             user_id = int(raw.lstrip("@"))
         except (ValueError, TypeError):
             user_id = None
-    username = raw.lstrip("@").lower()
+    # Telegram يرسل username بلا @ عادةً، لكن البيانات القديمة أو النسخ اليدوية
+    # قد تحتوي @ أو مسافات/محارف خفية. نطبّع الطرفين حتى لا يفشل البحث
+    # الصحيح بسبب اختلاف التخزين فقط.
+    username = raw.strip().lstrip("@").strip().lower()
     if order_id is not None:
         where, args = "EXISTS (SELECT 1 FROM orders ox WHERE ox.user_id = u.tg_id AND ox.id = $1)", [order_id]
     elif user_id is not None:
         where, args = "u.tg_id = $1", [user_id]
     else:
-        where, args = "lower(u.username) = $1", [username]
+        where = "regexp_replace(lower(COALESCE(u.username, '')), '[^a-z0-9_]', '', 'g') = regexp_replace($1, '[^a-z0-9_]', '', 'g')"
+        args = [username]
     row = await db.fetchrow(
         f"""
         SELECT u.*,
