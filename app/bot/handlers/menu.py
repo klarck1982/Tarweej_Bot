@@ -161,13 +161,6 @@ async def cb_faq_item(cb: CallbackQuery) -> None:
     await cb.answer()
 
 
-@router.callback_query(F.data.in_({"sup:new", "sup:mine"}))
-async def cb_ticket_soon(cb: CallbackQuery) -> None:
-    contact = f"@{CP.rt('support_username')}" if CP.rt("support_username") else T.NO_CONTACT
-    await cb.message.answer(T.TICKET_SOON.format(contact=contact), reply_markup=K.home_only())
-    await cb.answer()
-
-
 # ───────────── ℹ️ المعلومات ─────────────
 
 @router.message(F.text.in_({T.BTN_INFO, T.BTN_INFO_LONG}))

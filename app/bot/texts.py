@@ -959,3 +959,75 @@ CPANEL_OPEN = ("🖥️ <b>Cpanel</b> — لوحة الإدارة الكاملة
                "الأسعار · طرق الدفع · الخدمات · القنوات · الإحصائيات · سجل التغييرات\n\n"
                "<i>تُفتح لك وحدك (تحقق بتوقيع تيليغرام). أول فتحة بعد نوم السيرفر قد تأخذ ثوانٍ.</i>")
 CPANEL_LOCAL_ONLY = "🖥️ Cpanel تعمل فقط عندما يكون البوت منشوراً برابط https (Render) — محلياً استخدم لوحة الأزرار /admin."
+
+# ═══════════════════════════ v0.8.1 — 🎫 التذاكر + 📣 البث + 👤 البحث ═══════════════════════════
+TICKET_ORDER_PICK = "🎫 <b>فتح تذكرة</b>\n\nبخصوص أي طلب أو موضوع؟ اختر من القائمة:"
+TICKET_PROMPT = "✍️ اكتب مشكلتك بالتفصيل (حتى 1500 حرف)، ويمكنك إرفاق صورة أو ملف واحد:"
+TICKET_CREATED = "🎫 <b>تم فتح التذكرة #TCK-{id}</b>{order}\n\nوصلت رسالتك للفريق، وسنرد عليك هنا."
+TICKET_EXISTING = "📂 عندك تذكرة مفتوحة بالفعل بخصوص هذا الموضوع — أضف رسالتك إليها:"
+TICKET_NO_OPEN = "📂 ما عندك تذاكر مفتوحة حالياً."
+TICKET_VIEW = (
+    "🎫 <b>التذكرة #TCK-{id}</b> — {status}\n"
+    "{order}"
+    "🕒 آخر تحديث: {updated}\n\n"
+    "{messages}"
+)
+TICKET_REPLY_PROMPT = "✍️ اكتب ردك على التذكرة #TCK-{id}، ويمكنك إرفاق صورة أو ملف:"
+TICKET_CLOSED = "✅ أُغلقت التذكرة #TCK-{id}. إذا ظهرت مشكلة جديدة افتح تذكرة جديدة."
+TICKET_AUTO_CLOSED = "✅ أُغلقت التذكرة #TCK-{id} تلقائياً بعد 72 ساعة بلا رد جديد. إذا احتجت شيئاً افتح تذكرة جديدة."
+TICKET_CLIENT_REPLY = "💬 <b>رد جديد على التذكرة #TCK-{id}</b>\n\n{body}"
+TICKET_ADMIN_REPLY = "💬 <b>رد الفريق على التذكرة #TCK-{id}</b>\n\n{body}"
+TICKET_FILE_LINE = "📎 مرفق: {kind}"
+
+ADMIN_TICKET_LIST = "🎫 <b>التذاكر غير المغلقة ({n})</b>\nالأحدث أو التي تنتظر رد الفريق تظهر أولاً:"
+ADMIN_TICKET_EMPTY = "🎫 لا توجد تذاكر تنتظر المتابعة ✅"
+ADMIN_TICKET_CARD = (
+    "{icon} <b>التذكرة #TCK-{id}</b> — {status}\n"
+    "👤 {name} {username} — <code>{uid}</code>\n"
+    "{order}"
+    "💰 الرصيد: <b>{balance}</b>\n"
+    "🕒 آخر تحديث: {updated}\n\n"
+    "{messages}"
+)
+ADMIN_TICKET_REPLY_PROMPT = "✍️ اكتب ردك على التذكرة #TCK-{id} — سيصل للعميل في الخاص:"
+ADMIN_TICKET_CLOSED = "✅ أُغلقت التذكرة #TCK-{id} وأُبلغ العميل."
+ADMIN_TICKET_REPLY_DONE = "✅ أُرسل الرد للعميل، وصارت التذكرة 🔵 «تم الرد»."
+
+BROADCAST_TEXT_PROMPT = "📣 اكتب نص البث (حتى 4000 حرف). يمكنك استخدام <code>{name}</code> لاسم العميل:"
+BROADCAST_PHOTO_PROMPT = "🖼️ أرسل صورة واحدة اختيارية الآن، أو اضغط «بدون صورة» للمتابعة:"
+BROADCAST_PREVIEW = "📣 <b>معاينة البث</b>\n\n{body}\n\nاختر الجمهور:"
+BROADCAST_AUDIENCE = "👥 اختر شريحة واحدة — العدد لا يشمل المحظورين أو من حظروا البوت:"
+BROADCAST_CONFIRM = "⚠️ <b>تأكيد البث</b>\n\nالشريحة: <b>{segment}</b>\nالمستلمون: <b>{count}</b>\n\nبعد التأكيد يبدأ الإرسال ولا يمكن التراجع."
+BROADCAST_CONFIRM_BIG = "⚠️ الجمهور أكبر من 50. اضغط التأكيد مرة ثانية لبدء البث."
+BROADCAST_PROGRESS = "📤 <b>نتيجة البث</b>\nالشريحة: {segment}\n✅ أُرسلت: {sent}\n🚫 حظروا البوت: {blocked}\n⚠️ فشل مؤقت: {failed}\n⏱️ المدة: {seconds} ثانية"
+BROADCAST_CANCELLED = "أُلغي إعداد البث ✅"
+BROADCAST_EMPTY = "لا يوجد مستخدمون صالحون في هذه الشريحة."
+
+USER_SEARCH_PROMPT = "👤 اكتب Telegram ID أو @username أو رقم الطلب مثل <code>#ORD-1</code>:"
+USER_NOT_FOUND = "لم أجد مستخدماً بهذه القيمة. جرّب ID أو @username صحيحاً أو #ORD-رقم."
+USER_CARD = (
+    "👤 <b>{name}</b> {username}\n"
+    "🆔 <code>{uid}</code>\n"
+    "💰 الرصيد: <b>{balance}</b>\n"
+    "📦 الطلبات: <b>{orders}</b> · المفتوحة: <b>{open_orders}</b>\n"
+    "🎫 التذاكر غير المغلقة: <b>{tickets}</b>\n"
+    "📥 الشحنات المعتمدة: <b>{topups}</b>\n"
+    "🟢 الحالة: <b>{blocked}</b>{bot_blocked}"
+)
+USER_ADJUST_PROMPT = "{emoji} اكتب المبلغ والسبب، مثال:\n<code>{example}</code>"
+USER_ADJUST_INVALID = "الصيغة غير صحيحة. اكتب مبلغاً موجباً وسبباً، مثال: <code>5 تعويض تأخير</code>"
+USER_ADJUST_TOO_LARGE = "المبلغ يجب أن يكون أكبر من صفر وأقل من 10000$ لكل حركة."
+USER_ADJUST_SUMMARY = (
+    "📋 <b>ملخص تعديل الرصيد</b>\n\n"
+    "👤 {name} — <code>{uid}</code>\n"
+    "الرصيد قبل: <b>{before}</b>\n"
+    "{direction}: <b>{amount}</b>\n"
+    "الرصيد بعد: <b>{after}</b>\n"
+    "السبب: <i>{reason}</i>\n\n"
+    "اضغط تأكيد فقط إذا كانت البيانات صحيحة."
+)
+USER_ADJUST_CONFIRM = "✅ تأكيد {verb} {amount}"
+USER_ADJUST_DONE = "✅ تم تعديل رصيد {name}: {direction} {amount}\nالرصيد الآن: <b>{balance}</b>\nالسبب: {reason}"
+USER_ADJUST_NOTICE = "💰 <b>تم تحديث رصيدك</b>\n{direction}: <b>{amount}</b>\nرصيدك الآن: <b>{balance}</b>\nالسبب: {reason}"
+USER_BALANCE_BLOCKED = "⚠️ لا يمكن خصم {amount} — الرصيد الحالي {balance} فقط."
+USER_BLOCK_DONE = "{icon} تم {action} المستخدم {name}."

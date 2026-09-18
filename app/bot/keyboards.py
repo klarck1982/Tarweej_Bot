@@ -1139,3 +1139,100 @@ def admin_tasks_list(rows_data: list[tuple[int, str, str | None]]) -> InlineKeyb
         b.row(ib(label, f"adm:ord:{oid}:view", style))
     b.row(ib("🔄 تحديث", "adm:tasks"), ib("◀️ رجوع للوحة", "adm:panel"))
     return b.as_markup()
+
+# ═══════════════════════════ v0.8.1 — 🎫 التذاكر + 📣 البث + 👤 المستخدم ═══════════════════════════
+
+def ticket_order_choices(orders: list[dict]) -> InlineKeyboardMarkup:
+    from app.services import orders as orders_svc
+    rows = []
+    for o in orders[:12]:
+        label = f"{orders_svc.status_icon(o)} #ORD-{o['id']} · {T.esc((o.get('spec') or {}).get('title') or o.get('kind') or 'طلب')}"
+        rows.append([ib(label[:60], f"tck:open:order:{o['id']}")])
+    rows.append([ib("💰 الرصيد والشحن", "tck:open:topup")])
+    rows.append([ib("❓ سؤال عام", "tck:open:general")])
+    rows.append([ib("❌ إلغاء", "nav:home", "danger")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def ticket_list(items: list[dict], admin: bool = False) -> InlineKeyboardMarkup:
+    rows = []
+    for t in items[:40]:
+        icon = "🟡" if t.get("status") == "open" else ("🔵" if t.get("status") == "answered" else "✅")
+        who = (t.get("user_name") or "")[:12] if admin else ""
+        subject = f"#TCK-{t['id']}" + (f" · #ORD-{t['order_id']}" if t.get("order_id") else " · سؤال")
+        label = f"{icon} {subject}" + (f" · {who}" if who else "")
+        data = f"adm:tck:{t['id']}:view" if admin else f"tck:view:{t['id']}"
+        rows.append([ib(label[:60], data)])
+    rows.append([ib("🔄 تحديث", "adm:tickets" if admin else "sup:mine")])
+    rows.append([ib("◀️ رجوع", "adm:panel" if admin else "sup:menu")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def ticket_view(ticket: dict) -> InlineKeyboardMarkup:
+    rows = []
+    if ticket.get("status") != "closed":
+        rows.append([ib("↩️ إضافة رسالة", f"tck:reply:{ticket['id']}", "primary")])
+        rows.append([ib("✅ إغلاق التذكرة", f"tck:close:{ticket['id']}", "success")])
+    rows.append([ib("📂 تذاكري", "sup:mine"), ib("🏠 القائمة", "nav:home")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def admin_ticket_card(ticket: dict) -> InlineKeyboardMarkup:
+    tid = ticket["id"]
+    rows = []
+    if ticket.get("status") != "closed":
+        rows.append([ib("↩️ رد للعميل", f"adm:tck:{tid}:reply", "primary")])
+        rows.append([ib("✅ إغلاق التذكرة", f"adm:tck:{tid}:close", "success")])
+    if ticket.get("order_id"):
+        rows.append([ib(f"📦 فتح #ORD-{ticket['order_id']}", f"adm:ord:{ticket['order_id']}:view")])
+    rows.append([ib("🎫 التذاكر", "adm:tickets"), ib("🛠️ اللوحة", "adm:panel")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def broadcast_photo() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [ib("⏭️ بدون صورة", "adm:bc:no_photo", "primary")],
+        [ib("❌ إلغاء", "adm:bc:cancel", "danger")],
+    ])
+
+
+def broadcast_audience(counts: dict[str, int]) -> InlineKeyboardMarkup:
+    labels = [
+        ("all", f"👥 الجميع · {counts.get('all', 0)}"),
+        ("balance", f"💰 لديهم رصيد · {counts.get('balance', 0)}"),
+        ("ordered", f"📦 طلبوا سابقاً · {counts.get('ordered', 0)}"),
+        ("new", f"🆕 لم يطلبوا بعد · {counts.get('new', 0)}"),
+    ]
+    rows = [[ib(label, f"adm:bc:aud:{code}")] for code, label in labels]
+    rows.append([ib("❌ إلغاء", "adm:bc:cancel", "danger")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def broadcast_confirm(count: int, big: bool = False) -> InlineKeyboardMarkup:
+    rows = []
+    if big:
+        rows.append([ib(f"⚠️ تأكيد البث لـ {count}", "adm:bc:confirm2", "danger")])
+    else:
+        rows.append([ib(f"📣 ابدأ البث لـ {count}", "adm:bc:confirm", "success")])
+    rows.append([ib("✏️ تعديل المحتوى", "adm:bc:edit")])
+    rows.append([ib("❌ إلغاء", "adm:bc:cancel", "danger")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def admin_user_card(user: dict) -> InlineKeyboardMarkup:
+    uid = int(user["tg_id"])
+    blocked = bool(user.get("is_blocked"))
+    rows = [[ib("➕ إضافة رصيد", f"adm:user:{uid}:add", "success"),
+             ib("➖ خصم رصيد", f"adm:user:{uid}:sub", "danger")],
+            [ib("📦 طلباته", f"adm:user:{uid}:orders"), ib("🎫 تذاكره", f"adm:user:{uid}:tickets")],
+            [ib(("🔓 فك الحظر" if blocked else "🚫 حظر"), f"adm:user:{uid}:toggle", "danger" if not blocked else "success")],
+            [ib("👤 بحث جديد", "adm:find"), ib("◀️ اللوحة", "adm:panel")]]
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def admin_balance_confirm(uid: int, verb: str, amount: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [ib(f"✅ تأكيد {verb} {amount}", f"adm:bal:confirm:{uid}", "success")],
+        [ib("✏️ تعديل المبلغ/السبب", f"adm:user:{uid}:{'add' if verb == 'إضافة' else 'sub'}")],
+        [ib("❌ إلغاء", "adm:cancel_input", "danger")],
+    ])

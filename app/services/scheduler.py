@@ -124,7 +124,26 @@ async def tick(bot: Bot) -> None:
     await _sync_open_orders(bot)
     await _partner_posts(bot)
     await _design_tasks(bot)
+    await _tickets(bot)
     await _nour_health(bot)
+
+
+async def _tickets(bot: Bot) -> None:
+    """v0.8.1: إغلاق التذاكر التي صمت فيها الطرفان 72 ساعة بعد آخر رد للفريق."""
+    from app.bot import texts as T
+    from app.db.repo import tickets as ticket_repo
+    from app.services import ticket_notify as TN
+    try:
+        closed = await ticket_repo.auto_close(72)
+    except Exception as e:  # noqa: BLE001
+        log.warning("ticket auto-close failed: %s", e)
+        return
+    for item in closed:
+        try:
+            await bot.send_message(item["user_id"], T.TICKET_AUTO_CLOSED.format(id=item["id"]))
+        except Exception as e:  # noqa: BLE001
+            log.debug("ticket auto-close notice failed %s: %s", item["id"], e)
+        await TN.refresh_admin(bot, item["id"])
 
 
 async def _design_tasks(bot: Bot) -> None:
