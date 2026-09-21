@@ -64,6 +64,8 @@ def main_menu(is_admin: bool = False, balance: str = "0$", attention: int = 0,
     pair = [ib(T.BTN_TG, "nav:tg")] if (on("tg_ads") or on("tg_post")) else []
     if on("addons") or on("ai_reel"):
         pair.append(ib(T.BTN_DESIGN, "nav:design"))
+    if on("scheduled"):
+        pair.append(ib("📅 تصميم يومي", "sub:list", "primary"))
     if pair:
         rows.append(pair)
     rows += [
@@ -157,6 +159,42 @@ def design_services(enabled: bool = True, ai_on: bool = False) -> InlineKeyboard
         [ib(f"🎞️ مونتاج فيديو — 25${lock}", "add:svc:montage")],
         [ib(f"📦 باقات موفّرة{lock}", "add:svc:bundles")],
         [ib("🤖 ريل سينمائي AI" + (" — جديد ✨" if ai_on else " — قريباً 🔒"), "add:svc:ai_reel")],
+        [ib("📅 باقات تصميم يومي", "sub:list", "primary")],
+        [ib("🏠 القائمة", "nav:home")],
+    ])
+
+
+def scheduled_package_list(packages: list[dict]) -> InlineKeyboardMarkup:
+    rows = []
+    for p in packages:
+        price = P.fmt(p.get("price_usd", 0))
+        rows.append([ib(f"🎨 {p.get('title', 'باقة')} — {price} · {p.get('total_items', 0)} يوم", f"sub:pkg:{p.get('code', '')}", "primary")])
+    rows.append([ib("📂 اشتراكاتي", "sub:mine")])
+    rows.append([ib("🏠 القائمة", "nav:home")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def scheduled_package_detail(package: dict) -> InlineKeyboardMarkup:
+    code = package.get("code", "")
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [ib("✅ اشترك الآن", f"sub:buy:{code}", "success")],
+        [ib("◀️ رجوع للباقات", "sub:list")],
+        [ib("🏠 القائمة", "nav:home")],
+    ])
+
+
+def scheduled_purchase_confirm(code: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [ib("✅ تأكيد الدفع والاشتراك", f"sub:confirm:{code}", "success")],
+        [ib("💰 شحن الرصيد", "bal:topup")],
+        [ib("◀️ رجوع", f"sub:pkg:{code}")],
+    ])
+
+
+def scheduled_after_purchase() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [ib("📂 اشتراكاتي", "sub:mine")],
+        [ib("🎨 باقات أخرى", "sub:list")],
         [ib("🏠 القائمة", "nav:home")],
     ])
 
@@ -334,6 +372,14 @@ def cpanel_open(url: str) -> InlineKeyboardMarkup:
 
 def admin_back() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[[ib("◀️ رجوع للوحة", "adm:panel")]])
+
+
+def admin_scheduled_subscriber(subscription_id: int, cpanel_url: str | None = None) -> InlineKeyboardMarkup:
+    rows = [[ib("📤 إضافة محتوى عبر البوت", f"adm:sub:{subscription_id}:add", "primary")]]
+    if cpanel_url:
+        rows.append([InlineKeyboardButton(text="🖥️ إدارة من Cpanel ↗", web_app=WebAppInfo(url=cpanel_url), style="primary")])
+    rows.append([ib("📊 لوحة الإدارة", "adm:panel")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def admin_settings_menu() -> InlineKeyboardMarkup:

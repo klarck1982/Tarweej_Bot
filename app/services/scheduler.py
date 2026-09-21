@@ -124,8 +124,58 @@ async def tick(bot: Bot) -> None:
     await _sync_open_orders(bot)
     await _partner_posts(bot)
     await _design_tasks(bot)
+    await _scheduled_designs(bot)
     await _tickets(bot)
     await _nour_health(bot)
+
+
+async def _scheduled_designs(bot: Bot) -> None:
+    """📅 إرسال التصميم + النص المجدول لكل مشترك، مع حجز يمنع التكرار وإعادة محاولة الفشل."""
+    from app.bot import texts as T
+    from app.services import scheduled as SD
+    from app.db.repo import scheduled as SR
+    from app.services import order_notify as ON
+    for _ in range(10):
+        try:
+            item = await SR.due_item()
+        except Exception as e:  # noqa: BLE001
+            log.warning("scheduled content lookup failed: %s", e)
+            return
+        if not item:
+            return
+        try:
+            kind = item["file_kind"]
+            if kind == "photo":
+                await bot.send_photo(item["user_id"], item["file_id"])
+            elif kind == "video":
+                await bot.send_video(item["user_id"], item["file_id"])
+            else:
+                await bot.send_document(item["user_id"], item["file_id"])
+            copy_text = item.get("copy_text") or ""
+            if copy_text:
+                await bot.send_message(item["user_id"], T.esc(copy_text))
+            sub = await SR.mark_sent(item["id"], item["subscription_id"])
+            if sub:
+                done = int(sub.get("sent_count") or 0)
+                total = int(sub.get("total_items") or item.get("total_items") or 0)
+                if sub.get("status") == "completed":
+                    message = f"✅ اكتملت باقة التصميم — {done}/{total}\nشكراً لاستخدامك خدمتنا."
+                else:
+                    message = f"🎨 تم إرسال التصميم {item['seq']} من {total}\nالتصميم التالي حسب الموعد المحدد."
+                try:
+                    await bot.send_message(item["user_id"], message)
+                except Exception:
+                    pass
+                if sub.get("status") == "completed":
+                    await ON.notify_admins_text(bot, f"✅ <b>اكتملت باقة التصميم</b>\nSUB-{sub['id']} · {done}/{total}")
+        except Exception as e:  # noqa: BLE001
+            attempts = int(item.get("attempts") or 1)
+            retry = attempts < 3
+            sub = await SR.mark_failed(item["id"], item["subscription_id"], str(e), retry=retry)
+            if retry:
+                log.warning("scheduled delivery SUB-%s day %s failed (%s/%s): %s", item["subscription_id"], item["seq"], attempts, 3, e)
+            else:
+                await ON.notify_admins_text(bot, f"⚠️ <b>توقفت جدولة تصميم</b>\nSUB-{item['subscription_id']} · اليوم {item['seq']}\nالسبب: {T.esc(str(e)[:250])}")
 
 
 async def _tickets(bot: Bot) -> None:

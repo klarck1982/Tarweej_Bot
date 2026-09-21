@@ -20,6 +20,7 @@ from app.db import pool as db
 from app.db.repo import settings as settings_repo
 from app.services import payments as PM
 from app.services import pricing as P
+from app.services import scheduled as SD
 
 AUTH_MAX_AGE = 3600  # ثانية — بعدها يُطلب فتح جديد من الزر
 
@@ -259,7 +260,7 @@ async def save_payments(raw: dict, admin_id: int) -> list[str]:
 # ═══════════════════════════ الخدمات ═══════════════════════════
 
 SERVICE_NAMES = {"meta": "📢 إعلانات فيسبوك / إنستغرام", "tg_ads": "📣 إعلان Telegram Ads الرسمي",
-                 "tg_post": "📝 نشر في قنوات شريكة", "addons": "🎨 تصميم وكتابة", "ai_reel": "🎬 ريلز سينمائية AI"}
+                 "tg_post": "📝 نشر في قنوات شريكة", "addons": "🎨 تصميم وكتابة", "scheduled": "📅 تصميم يومي مجدول", "ai_reel": "🎬 ريلز سينمائية AI"}
 SERVICE_LOCKED = {"tg_post": "يُفتح تلقائياً عند إضافة أول قناة شريكة", "ai_reel": "مقفول — يُفعَّل لاحقاً"}
 
 
@@ -466,6 +467,7 @@ async def snapshot() -> dict:
         "general": await general(), "general_env": {"support_username": settings.support_username, "updates_channel": settings.updates_channel},
         "payments": await PM.get_methods(), "payment_order": PM.METHOD_ORDER, "syp_rate": str(await PM.syp_rate()),
         "services": await settings_repo.services(), "service_names": SERVICE_NAMES, "service_locked": await service_locks(),
+        "scheduled": await SD.snapshot(),
         "channels": await channels_view(), "partner": await partner_channels_view(), "audit": await audit_log(30),
         "nour": await _nour_view(), "reset": await _reset_preview(),
     }

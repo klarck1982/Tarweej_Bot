@@ -48,6 +48,13 @@ class UserMiddleware(BaseMiddleware):
                 elif isinstance(event, CallbackQuery):
                     await event.answer(T.BLOCKED, show_alert=True)
                 return None
+            if is_new and not is_admin and data.get("bot"):
+                try:
+                    from app.services import notify
+                    await notify.notify_admins_new_user(data["bot"], user)
+                except Exception as notify_error:  # noqa: BLE001
+                    # فشل التنبيه لا يجب أن يمنع المستخدم الجديد من متابعة البوت.
+                    log.warning("new user notification failed: %s", notify_error)
         except Exception as e:  # noqa: BLE001
             # لا نمنع الرد بسبب عطل مؤقت في القاعدة — نكمل بدون تسجيل
             log.warning("user middleware db error: %s", e)

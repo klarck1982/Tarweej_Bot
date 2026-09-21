@@ -26,7 +26,7 @@ log = logging.getLogger("launch_reset")
 CONFIRM_WORD = "تصفير"
 
 # الجداول التشغيلية بترتيب آمن للمفاتيح الأجنبية (TRUNCATE ... CASCADE يتكفّل بالباقي)
-_OPS_TABLES = ("ticket_messages", "tickets", "tasks", "order_media", "orders", "topups", "ledger", "fsm_state", "users")
+_OPS_TABLES = ("scheduled_subscription_items", "scheduled_subscriptions", "ticket_messages", "tickets", "tasks", "order_media", "orders", "topups", "ledger", "fsm_state", "users")
 # مفاتيح settings التشغيلية التي تُحذف (ليست إعدادات)
 _OPS_SETTINGS = ("nour_health", "dry_nour_balance_usd")
 
@@ -34,7 +34,7 @@ _OPS_SETTINGS = ("nour_health", "dry_nour_balance_usd")
 async def preview() -> dict:
     """الأرقام التي ستُعرض قبل التأكيد + هل التصفير مسموح الآن."""
     counts = {}
-    for t in ("users", "ledger", "topups", "orders", "order_media", "tasks", "tickets", "events", "partner_channels"):
+    for t in ("users", "ledger", "topups", "orders", "scheduled_subscriptions", "scheduled_subscription_items", "order_media", "tasks", "tickets", "events", "partner_channels"): 
         counts[t] = int(await db.fetchval(f"SELECT count(*) FROM {t}") or 0)
     counts["cpanel_changes"] = int(await db.fetchval("SELECT count(*) FROM events WHERE type = 'cpanel_change'") or 0)
     counts["events"] -= counts["cpanel_changes"]
@@ -52,7 +52,7 @@ async def preview() -> dict:
     return {"counts": counts, "client_balances": float(balances), "dry": dry, "live_open": live_open,
             "allowed": not blockers, "blockers": blockers, "confirm_word": CONFIRM_WORD,
             "keeps": ["الأسعار", "طرق الدفع", "الخدمات والصيانة", "الإعدادات العامة", "قنوات الإدارة", "سجل تغييرات Cpanel"],
-            "wipes": ["المستخدمون وأرصدتهم", "الشحنات", "الطلبات وملفاتها", "المهام والتذاكر", "دفتر الحركات والأحداث", "القنوات الشريكة"]}
+            "wipes": ["المستخدمون وأرصدتهم", "الشحنات", "الطلبات وملفاتها والاشتراكات المجدولة", "المهام والتذاكر", "دفتر الحركات والأحداث", "القنوات الشريكة"]}
 
 
 async def execute(admin_id: int, confirm: str, wipe_partner: bool = True) -> dict:

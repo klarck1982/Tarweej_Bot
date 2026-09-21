@@ -58,6 +58,6 @@ def invalidate(key: str | None = None) -> None:
 
 async def services() -> dict[str, bool]:
     """أي الخدمات مفعّلة الآن — الخدمة المتوقفة تظهر بزر 🔒 لا تختفي."""
-    default = {"meta": True, "tg_ads": True, "tg_post": True, "addons": True, "ai_reel": False}
+    default = {"meta": True, "tg_ads": True, "tg_post": True, "addons": True, "ai_reel": False, "scheduled": True}
     val = await get("services", default)
     return {**default, **(val or {})}

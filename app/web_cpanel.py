@@ -16,14 +16,18 @@
 
 from __future__ import annotations
 
+import html
 import json
 import logging
 from pathlib import Path
 
 from aiogram import Bot
+from aiogram.types import BufferedInputFile
 from aiohttp import web
 
+from app.db import pool as db
 from app.services import cpanel as CP
+from app.services import scheduled as SD
 
 log = logging.getLogger("cpanel")
 _HTML_PATH = Path(__file__).parent / "static" / "cpanel.html"
@@ -207,7 +211,212 @@ def make_reset_execute(bot: Bot):
     return reset_execute
 
 
+async def scheduled_snapshot(request: web.Request) -> web.Response:
+    _auth(request)
+    return _json(await SD.snapshot())
+
+
+async def scheduled_package_save(request: web.Request) -> web.Response:
+    user = _auth(request)
+    body = await _body(request)
+    try:
+        package, existed = await SD.save_package(body, user["id"])
+        await CP.audit(user["id"], "scheduled", f"package.{package['code']}", None if not existed else "existing", package)
+    except ValueError as e:
+        return _json({"error": "invalid", "message": str(e)}, 400)
+    except Exception as e:  # noqa: BLE001
+        log.exception("scheduled package save failed: %s", e)
+        return _json({"error": "server", "message": "تعذر حفظ الباقة."}, 500)
+    return _json({"ok": True, "package": package, "scheduled": await SD.snapshot()})
+
+
+async def scheduled_package_toggle(request: web.Request) -> web.Response:
+    user = _auth(request)
+    body = await _body(request)
+    code = str(body.get("code") or "")
+    try:
+        package = await SD.toggle_package(code, bool(body.get("enabled")))
+    except Exception as e:  # noqa: BLE001
+        return _json({"error": "server", "message": str(e)[:160]}, 500)
+    if not package:
+        return _json({"error": "missing", "message": "الباقة غير موجودة"}, 404)
+    await CP.audit(user["id"], "scheduled", f"package.{code}.enabled", None, package["enabled"])
+    return _json({"ok": True, "package": package, "scheduled": await SD.snapshot()})
+
+
+async def scheduled_package_delete(request: web.Request) -> web.Response:
+    user = _auth(request)
+    body = await _body(request)
+    code = str(body.get("code") or "")
+    try:
+        ok = await SD.delete_package(code)
+    except Exception as e:  # noqa: BLE001
+        return _json({"error": "server", "message": str(e)[:160]}, 500)
+    if not ok:
+        return _json({"error": "missing", "message": "الباقة غير موجودة"}, 404)
+    await CP.audit(user["id"], "scheduled", f"package.{code}.deleted", True, False)
+    return _json({"ok": True, "scheduled": await SD.snapshot()})
+
+
+async def scheduled_subscribers(request: web.Request) -> web.Response:
+    _auth(request)
+    body = await _body(request)
+    q = str(body.get("q") or "")[:100]
+    page = max(1, int(body.get("page") or 1))
+    limit = 40
+    from app.db.repo import scheduled as SR
+    rows = await SR.list_subscriptions(q, limit=limit, offset=(page - 1) * limit)
+    return _json({"items": rows, "count": await SR.count_subscriptions(q), "page": page})
+
+
+async def scheduled_detail(request: web.Request) -> web.Response:
+    _auth(request)
+    body = await _body(request)
+    try:
+        item = await SD.detail(int(body.get("id") or 0))
+    except (TypeError, ValueError):
+        item = None
+    if not item:
+        return _json({"error": "missing", "message": "الاشتراك غير موجود"}, 404)
+    return _json(item)
+
+
+async def scheduled_content_json(request: web.Request) -> web.Response:
+    user = _auth(request)
+    body = await _body(request)
+    try:
+        item = await SD.add_content(int(body.get("subscription_id") or 0), int(body.get("seq") or 0),
+                                    str(body.get("file_kind") or "document"), str(body.get("file_id") or ""),
+                                    str(body.get("copy_text") or ""))
+    except ValueError as e:
+        return _json({"error": "invalid", "message": str(e)}, 400)
+    await CP.audit(user["id"], "scheduled", f"content.{body.get('subscription_id')}.{body.get('seq')}", None, "saved")
+    return _json({"ok": True, "item": item})
+
+
+def make_scheduled_upload(bot: Bot):
+    async def scheduled_upload(request: web.Request) -> web.Response:
+        user = _auth(request)
+        if request.content_length and request.content_length > 22 * 1024 * 1024:
+            return _json({"error": "too_large", "message": "الملف أكبر من 20MB."}, 413)
+        try:
+            reader = await request.multipart()
+            fields: dict[str, str] = {}
+            data = None
+            filename = "design.bin"
+            content_type = "application/octet-stream"
+            while True:
+                part = await reader.next()
+                if part is None:
+                    break
+                if part.name == "file":
+                    filename = part.filename or filename
+                    content_type = part.headers.get("Content-Type", content_type)
+                    data = await part.read(decode=False)
+                    if len(data) > 20 * 1024 * 1024:
+                        return _json({"error": "too_large", "message": "الملف أكبر من 20MB."}, 413)
+                else:
+                    fields[part.name] = (await part.text()).strip()
+            if not data:
+                return _json({"error": "invalid", "message": "أرفق ملف التصميم أولاً."}, 400)
+            sid = int(fields.get("subscription_id") or 0)
+            seq = int(fields.get("seq") or 0)
+            # نرفعه إلى Telegram كملف للحفاظ على الدقة الأصلية، ثم نحفظ file_id فقط.
+            msg = await bot.send_document(user["id"], BufferedInputFile(data, filename=filename),
+                                          caption=f"📦 حفظ مؤقت لجدولة SUB-{sid} · اليوم {seq}")
+            file_id = msg.document.file_id
+            try:
+                await bot.delete_message(user["id"], msg.message_id)
+            except Exception:
+                pass
+            item = await SD.add_content(sid, seq, "document", file_id, fields.get("copy_text", ""))
+            await CP.audit(user["id"], "scheduled", f"content.{sid}.{seq}", None, "uploaded")
+            return _json({"ok": True, "item": item})
+        except ValueError as e:
+            return _json({"error": "invalid", "message": str(e)}, 400)
+        except Exception as e:  # noqa: BLE001
+            log.exception("scheduled upload failed: %s", e)
+            return _json({"error": "server", "message": "تعذر رفع التصميم وحفظه."}, 500)
+    return scheduled_upload
+
+
+async def scheduled_activate(request: web.Request) -> web.Response:
+    user = _auth(request)
+    body = await _body(request)
+    try:
+        sub = await SD.activate(int(body.get("id") or 0), str(body.get("start_date") or ""), str(body.get("send_time") or "") or None)
+    except ValueError as e:
+        return _json({"error": "invalid", "message": str(e)}, 400)
+    except Exception as e:  # noqa: BLE001
+        log.exception("scheduled activate failed: %s", e)
+        return _json({"error": "server", "message": "تعذر تفعيل الجدولة."}, 500)
+    if not sub:
+        return _json({"error": "missing", "message": "الاشتراك غير موجود"}, 404)
+    await CP.audit(user["id"], "scheduled", f"subscription.{sub['id']}.activate", None, sub.get("start_at"))
+    try:
+        await request.app["bot"].send_message(sub["user_id"], f"✅ تم تجهيز باقة <b>{html.escape(str(sub.get('package_title') or ''), quote=False)}</b>\nسيبدأ الإرسال حسب الموعد المحدد.")
+    except Exception:
+        pass
+    return _json({"ok": True, "subscription": await SD.detail(int(sub["id"]))})
+
+
+async def scheduled_action(request: web.Request) -> web.Response:
+    user = _auth(request)
+    body = await _body(request)
+    sid = int(body.get("id") or 0)
+    action = str(body.get("action") or "")
+    try:
+        if action == "pause":
+            sub = await SD.pause(sid)
+        elif action == "resume":
+            sub = await SD.resume(sid)
+        elif action == "cancel":
+            sub = await SD.cancel(sid, admin_id=user["id"])
+        else:
+            return _json({"error": "invalid", "message": "الإجراء غير معروف"}, 400)
+    except Exception as e:  # noqa: BLE001
+        return _json({"error": "server", "message": str(e)[:160]}, 500)
+    if not sub:
+        return _json({"error": "missing", "message": "الاشتراك غير موجود"}, 404)
+    await CP.audit(user["id"], "scheduled", f"subscription.{sid}.{action}", None, sub.get("status"))
+    try:
+        if action == "cancel":
+            await request.app["bot"].send_message(sub["user_id"], "↩️ تم إلغاء باقة التصميم وإعادة قيمة الأيام غير المنفذة إلى رصيدك.")
+        elif action == "pause":
+            await request.app["bot"].send_message(sub["user_id"], "⏸️ تم إيقاف جدولة باقة التصميم مؤقتاً.")
+        elif action == "resume":
+            await request.app["bot"].send_message(sub["user_id"], "▶️ استؤنفت جدولة باقة التصميم.")
+    except Exception:
+        pass
+    return _json({"ok": True, "subscription": await SD.detail(sid)})
+
+
+async def users_directory(request: web.Request) -> web.Response:
+    _auth(request)
+    body = await _body(request)
+    q = str(body.get("q") or "").strip().lstrip("@")[:100].lower()
+    page = max(1, int(body.get("page") or 1))
+    limit = 50
+    rows = await db.fetch(
+        """
+        SELECT u.tg_id, u.name, u.username, u.balance_usd, u.created_at, u.last_seen,
+               u.accepted_terms_at, u.is_blocked, u.is_blocked_bot,
+               (SELECT count(*) FROM orders o WHERE o.user_id=u.tg_id) AS orders_count,
+               (SELECT count(*) FROM topups t WHERE t.user_id=u.tg_id AND t.status='approved') AS topups_count
+        FROM users u
+        WHERE ($1='' OR lower(coalesce(u.name,'')) LIKE '%'||$1||'%' OR lower(coalesce(u.username,'')) LIKE '%'||$1||'%' OR u.tg_id::text=$1)
+        ORDER BY u.last_seen DESC NULLS LAST
+        LIMIT $2 OFFSET $3
+        """, q, limit, (page - 1) * limit,
+    )
+    total = await db.fetchval(
+        "SELECT count(*) FROM users u WHERE ($1='' OR lower(coalesce(u.name,'')) LIKE '%'||$1||'%' OR lower(coalesce(u.username,'')) LIKE '%'||$1||'%' OR u.tg_id::text=$1)", q
+    )
+    return _json({"items": [dict(r) for r in rows], "count": int(total or 0), "page": page})
+
+
 def setup_cpanel(app: web.Application, bot: Bot) -> None:
+    app["bot"] = bot
     app.router.add_post("/cpanel/api/nour/test", nour_test)
     app.router.add_post("/cpanel/api/nour/report", make_nour_report(bot))
     app.router.add_post("/cpanel/api/reset/preview", reset_preview)
@@ -219,4 +428,15 @@ def setup_cpanel(app: web.Application, bot: Bot) -> None:
     app.router.add_post("/cpanel/api/snapshot", snapshot)
     app.router.add_post("/cpanel/api/stats", stats)
     app.router.add_post("/cpanel/api/save/{section}", save)
+    app.router.add_post("/cpanel/api/scheduled/snapshot", scheduled_snapshot)
+    app.router.add_post("/cpanel/api/scheduled/package/save", scheduled_package_save)
+    app.router.add_post("/cpanel/api/scheduled/package/toggle", scheduled_package_toggle)
+    app.router.add_post("/cpanel/api/scheduled/package/delete", scheduled_package_delete)
+    app.router.add_post("/cpanel/api/scheduled/subscribers", scheduled_subscribers)
+    app.router.add_post("/cpanel/api/scheduled/detail", scheduled_detail)
+    app.router.add_post("/cpanel/api/scheduled/content", scheduled_content_json)
+    app.router.add_post("/cpanel/api/scheduled/upload", make_scheduled_upload(bot))
+    app.router.add_post("/cpanel/api/scheduled/activate", scheduled_activate)
+    app.router.add_post("/cpanel/api/scheduled/action", scheduled_action)
+    app.router.add_post("/cpanel/api/users/directory", users_directory)
     app.router.add_post("/cpanel/api/channel_test", make_channel_test(bot))

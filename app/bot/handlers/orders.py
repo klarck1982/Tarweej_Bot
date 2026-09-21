@@ -30,7 +30,7 @@ async def orders_view(uid: int, page: int = 1) -> tuple[str, object]:
     data = []
     for o in rows:
         spec = o["spec"]
-        label = f"{orders_svc.STATUS_ICON.get(o['status'], '•')} #ORD-{o['id']} · {ON.pkg_label(spec)} · {fmt(o['price_usd'])} · {orders_svc.STATUS_NAME.get(o['status'], '')}"
+        label = f"{orders_svc.STATUS_ICON.get(o['status'], '•')} #ORD-{o['id']} · {ON.pkg_label(spec)} · {fmt(o['price_usd'])} · {orders_svc.status_name(o)}"
         data.append((o["id"], label[:60]))
     return T.ORDERS_LIST, K.orders_list(data, page, pages, draft["id"] if draft else None)
 
@@ -57,6 +57,19 @@ async def cb_orders(cb: CallbackQuery, state: FSMContext) -> None:
     await cb.answer()
 
 
+def scheduled_order_text(o: dict) -> str:
+    spec = o["spec"]
+    total = int(spec.get("total_items") or 0)
+    return (
+        f"📅 <b>{T.esc(spec.get('package_title') or 'تصميم يومي')}</b>\n\n"
+        f"رقم الطلب: <code>#ORD-{o['id']}</code>\n"
+        f"الحالة: <b>{orders_svc.status_name(o)}</b>\n"
+        f"المحتوى: {total} تصميم + {total} نصاً كتابياً\n"
+        f"السعر: <b>{fmt(o['price_usd'])}</b>\n"
+        "\nسيتم إرسال التصميم والنص يومياً في الموعد الذي تحدده الإدارة."
+    )
+
+
 def ds_order_text(o: dict) -> str:
     from app.services import design as DS
     spec = o["spec"]
@@ -80,6 +93,8 @@ def ds_order_text(o: dict) -> str:
 
 def order_text(o: dict) -> str:
     spec = o["spec"]
+    if (spec or {}).get("scheduled_subscription"):
+        return scheduled_order_text(o)
     if o.get("kind") == "design":
         return ds_order_text(o)
     if o.get("kind") == "tg_ads":
@@ -157,6 +172,8 @@ def tgp_order_text(o: dict) -> str:
 
 
 def client_kb(o: dict):
+    if (o.get("spec") or {}).get("scheduled_subscription"):
+        return K.scheduled_after_purchase()
     if o.get("kind") == "design":
         return K.ds_order_view(o)
     if o.get("kind") == "tg_post":

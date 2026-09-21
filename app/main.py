@@ -23,10 +23,11 @@ from aiohttp import web
 from app import STEP, VERSION
 from app.bot import texts as T
 from app.bot.fsm_storage import PostgresStorage
-from app.bot.handlers import design_wizard, fallback, menu, meta_wizard, orders, start, tg_ads_wizard, tg_post_wizard, tickets, topup
+from app.bot.handlers import design_wizard, fallback, menu, meta_wizard, orders, scheduled, start, tg_ads_wizard, tg_post_wizard, tickets, topup
 from app.bot.wide import WideButtonsMiddleware
 from app.bot.handlers.admin import panel as admin_panel
 from app.bot.handlers.admin import orders as admin_orders
+from app.bot.handlers.admin import scheduled as admin_scheduled
 from app.bot.handlers.admin import tools as admin_tools
 from app.bot.handlers.admin import topups as admin_topups
 from app.bot.middlewares import ErrorsMiddleware, UserMiddleware
@@ -53,6 +54,7 @@ def build_dispatcher() -> Dispatcher:
     # الترتيب مهم: الأدمن أولاً، ثم start، ثم القوائم، وأخيراً fallback يلتقط كل ما تبقّى
     dp.include_router(admin_topups.router)
     dp.include_router(admin_orders.router)
+    dp.include_router(admin_scheduled.router)  # محتوى الاشتراكات المجدولة
     dp.include_router(admin_tools.router)  # v0.8.1: تذاكر + بث + بحث/رصيد (قبل لوحة soon)
     dp.include_router(admin_panel.router)
     dp.include_router(start.router)
@@ -60,6 +62,7 @@ def build_dispatcher() -> Dispatcher:
     dp.include_router(tg_ads_wizard.router) # tga:*
     dp.include_router(tg_post_wizard.router)  # tgp:*
     dp.include_router(design_wizard.router)   # ds:* + add:svc:* (قبل menu)
+    dp.include_router(scheduled.router)       # sub:* — باقات التصميم المجدولة
     dp.include_router(tickets.router)        # sup:* و ord:help و tck:*
     dp.include_router(orders.router)
     dp.include_router(menu.router)

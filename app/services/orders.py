@@ -62,6 +62,8 @@ TG_POST_STATUS_NAME = {
 
 def status_name(order: dict) -> str:
     st = order["status"]
+    if (order.get("spec") or {}).get("scheduled_subscription"):
+        return {"active": "بانتظار تجهيز الجدولة", "paused": "متوقفة مؤقتاً", "completed": "مكتملة", "cancelled": "ملغاة", "refunded": "مستردة"}.get(st, st)
     if order.get("kind") == "tg_ads":
         return TG_ADS_STATUS_NAME.get(st, STATUS_NAME.get(st, st))
     if order.get("kind") == "tg_post":

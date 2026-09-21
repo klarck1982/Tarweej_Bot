@@ -25,6 +25,59 @@ def esc(s: str | None) -> str:
     return html.escape(s or "", quote=False)
 
 
+async def notify_admins_new_user(bot: Bot, user) -> None:
+    """تنبيه الأدمن عند أول ظهور لمستخدم جديد في البوت."""
+    name = esc(getattr(user, "full_name", None) or getattr(user, "first_name", None) or "بدون اسم")
+    username = getattr(user, "username", None)
+    username_txt = f"@{esc(username)}" if username else "بدون @username"
+    text = (
+        "👤 <b>مستخدم جديد انضم إلى البوت</b>\n\n"
+        f"الاسم: <a href=\"tg://user?id={int(user.id)}\">{name}</a>\n"
+        f"المعرف: <b>{username_txt}</b>\n"
+        f"Telegram ID: <code>{int(user.id)}</code>\n\n"
+        "💡 يمكنك البحث عنه من لوحة الإدارة باستخدام الـ ID أو @username."
+    )
+    try:
+        await channels.alert(bot, text)
+    except Exception as e:  # noqa: BLE001 — لا نمنع المستخدم من دخول البوت بسبب فشل التنبيه
+        log.warning("cannot notify admins about new user %s: %s", user.id, e)
+
+
+async def notify_admins_new_subscriber(bot: Bot, subscription: dict) -> None:
+    """تنبيه المشترك الجديد في قناة التنبيهات والخاص معاً."""
+    name = esc(str(subscription.get("user_name") or "بدون اسم"))
+    username = subscription.get("user_username")
+    username_txt = f"@{esc(username)}" if username else "بدون @username"
+    title = esc(str(subscription.get("package_title") or "باقة تصميم"))
+    text = (
+        "🆕 <b>مشترك جديد في باقة التصميم</b>\n\n"
+        f"الباقة: <b>{title}</b>\n"
+        f"العميل: <a href=\"tg://user?id={int(subscription['user_id'])}\">{name}</a>\n"
+        f"المعرف: <b>{username_txt}</b>\n"
+        f"الاشتراك: <code>SUB-{int(subscription['id'])}</code>\n"
+        f"الطلب: <code>#ORD-{int(subscription['order_id'])}</code>\n"
+        f"السعر: <b>{fmt(subscription.get('price_usd') or 0)}</b>\n\n"
+        "📌 أضف التصاميم والنصوص وفعّل الجدولة من Cpanel."
+    )
+    try:
+        # إذا كانت قناة التنبيهات مربوطة نرسل إليها، ثم نرسل نسخة خاصة للأدمن؛
+        # إذا لم تكن مربوطة نكتفي بالخاص حتى لا تصلك الرسالة مرتين.
+        if await channels.get("alerts"):
+            await channels.alert(bot, text)
+    except Exception as e:  # noqa: BLE001
+        log.warning("subscriber alert channel failed: %s", e)
+    try:
+        from app.services import cpanel as CP
+        kb = K.admin_scheduled_subscriber(int(subscription["id"]), CP.cpanel_url())
+    except Exception:
+        kb = None
+    for admin_id in settings.admin_ids:
+        try:
+            await bot.send_message(admin_id, text, reply_markup=kb)
+        except Exception as e:  # noqa: BLE001
+            log.debug("subscriber private alert failed for %s: %s", admin_id, e)
+
+
 async def topup_card_text(tid: int) -> tuple[str, dict]:
     row = await topups_repo.get(tid)
     if row is None:

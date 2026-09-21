@@ -34,6 +34,8 @@ def pkg_label(spec: dict) -> str:
     if spec.get("kind") == "tg_post":
         return f"📝 {str(spec.get('channel_title') or 'قناة')[:14]}"
     if spec.get("kind") == "design":
+        if spec.get("scheduled_subscription"):
+            return f"📅 {str(spec.get('package_title') or 'تصميم يومي')[:16]}"
         return f"🎨 {str(spec.get('title') or 'تصميم')[:16]}"
     code = spec.get("pkg")
     if code in P.META_BY_CODE:
@@ -129,6 +131,18 @@ async def admin_tgp_card_text(order: dict, media_count: int) -> str:
     )
 
 
+async def admin_scheduled_card_text(order: dict) -> str:
+    spec = order.get("spec") or {}
+    total = int(spec.get("total_items") or 0)
+    return (
+        f"📅 <b>اشتراك تصميم مجدول #ORD-{order['id']}</b>\n"
+        f"العميل: {esc(order.get('user_name'))} · ID <code>{order['user_id']}</code>\n"
+        f"الباقة: <b>{esc(spec.get('package_title') or 'تصميم يومي')}</b>\n"
+        f"المحتوى: {total} تصميم + {total} نصاً · السعر {fmt(order.get('price_usd') or 0)}\n"
+        "📌 إدارة المحتوى والجدولة من Cpanel → 📅 التصميم."
+    )
+
+
 async def admin_ds_card_text(order: dict, media_count: int) -> str:
     """بطاقة مهمة التصميم عند الأدمن — نفس أسطر ملخص العميل + المهلة والتسليمات والتعديل."""
     from app.services import design as DS
@@ -167,6 +181,8 @@ async def admin_ds_card_text(order: dict, media_count: int) -> str:
 
 
 def admin_card_kb(order: dict, media_count: int, in_channel: bool):
+    if (order.get("spec") or {}).get("scheduled_subscription"):
+        return K.admin_back()
     if order.get("kind") == "design":
         return K.admin_ds_card(order, media_count, in_channel=in_channel)
     if order.get("kind") == "tg_ads":
@@ -177,6 +193,8 @@ def admin_card_kb(order: dict, media_count: int, in_channel: bool):
 
 
 async def admin_card_text(order: dict, media_count: int) -> str:
+    if (order.get("spec") or {}).get("scheduled_subscription"):
+        return await admin_scheduled_card_text(order)
     if order.get("kind") == "design":
         return await admin_ds_card_text(order, media_count)
     if order.get("kind") == "tg_ads":
