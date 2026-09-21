@@ -387,7 +387,6 @@ def admin_settings_menu() -> InlineKeyboardMarkup:
         [ib("🔛 تشغيل / إيقاف الخدمات", "adm:svcs")],
         [ib("🏦 طرق الدفع والحسابات", "adm:wallets")],
         [ib("💱 سعر صرف الليرة", "adm:rate")],
-        [ib("👤 المعرّف الاحتياطي (نور)", "adm:fallback")],
         [ib("📡 قنوات الإدارة", "adm:ch:menu")],
         [ib("◀️ رجوع للوحة", "adm:panel")],
     ])

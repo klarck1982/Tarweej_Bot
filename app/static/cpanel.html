@@ -273,6 +273,23 @@ textarea{min-height:60px;resize:vertical}
     <div style="height:70px"></div>
   </section>
 
+  <!-- ═══ السجل المالي ═══ -->
+  <section id="tab-ledger" class="hidden">
+    <div class="hero"><div class="ht">🧾 السجل المالي</div><div class="hs">كل الإيداعات والخصومات والاستردادات والتعديلات — سجل تدقيقي كامل</div></div>
+    <div class="kpis" style="grid-template-columns:repeat(3,1fr)">
+      <div class="kpi"><div class="l">📥 الداخل</div><div class="v" id="ledger-in">—</div><div class="d">إيداعات واستردادات</div></div>
+      <div class="kpi"><div class="l">📤 الخارج</div><div class="v" id="ledger-out">—</div><div class="d">خصومات الطلبات</div></div>
+      <div class="kpi"><div class="l">🧮 الصافي</div><div class="v" id="ledger-net">—</div><div class="d" id="ledger-pending"></div></div>
+    </div>
+    <div class="card">
+      <div class="row"><input class="wide" id="ledger-search" placeholder="اسم، @username، Telegram ID أو رقم المرجع"><select id="ledger-type" style="width:145px"><option value="">كل الحركات</option><option value="topup">إيداع</option><option value="order_charge">خصم طلب</option><option value="refund">استرداد</option><option value="referral">إحالة</option><option value="adjustment">تعديل إداري</option></select><button class="btn g sm" onclick="loadLedger(1)">بحث</button></div>
+      <div class="chips" id="ledger-periods" style="margin:10px 0 0"><span class="chip" data-ledger-period="today">اليوم</span><span class="chip on" data-ledger-period="7d">7 أيام</span><span class="chip" data-ledger-period="30d">30 يوم</span><span class="chip" data-ledger-period="all">الكل</span></div>
+    </div>
+    <div class="card" id="ledger-list"><div class="empty">جارٍ تحميل السجل…</div></div>
+    <div class="row" id="ledger-nav" style="justify-content:center"></div>
+    <div style="height:70px"></div>
+  </section>
+
   <!-- ═══ التصميم المجدول ═══ -->
   <section id="tab-scheduled" class="hidden">
     <div class="hero"><div class="ht">📅 التصميم اليومي المجدول</div><div class="hs">الباقات · المشتركون · التصميم + النص · الجدولة</div></div>
@@ -302,6 +319,7 @@ textarea{min-height:60px;resize:vertical}
       <div class="row"><input class="wide" id="sd-users-search" placeholder="اسم، @username أو Telegram ID"><button class="btn g sm" onclick="sdLoadUsers()">بحث</button></div>
     </div>
     <div class="card" id="sd-users"><div class="empty">اضغط بحث لعرض المستخدمين</div></div>
+    <div class="card hidden" id="sd-user-ledger"></div>
     <div style="height:70px"></div>
   </section>
 
@@ -418,6 +436,7 @@ textarea{min-height:60px;resize:vertical}
     <button class="tab" data-tab="pricing"><i>💲</i>الأسعار</button>
     <button class="tab" data-tab="pay"><i>💳</i>الدفع</button>
     <button class="tab" data-tab="services"><i>🧩</i>الخدمات</button>
+    <button class="tab" data-tab="ledger"><i>🧾</i>المال</button>
     <button class="tab" data-tab="scheduled"><i>📅</i>التصميم</button>
     <button class="tab" data-tab="more"><i>⚙️</i>المزيد</button>
   </nav>
@@ -464,7 +483,7 @@ function renderAll() {
   $("#hello").textContent = "مرحباً " + (S.me.name || "") + " 👋";
   $("#botname").textContent = S.bot_name + " · Cpanel";
   $("#ver").textContent = "v" + S.version; $("#ver2").textContent = "v" + S.version;
-  renderStats(S.stats); renderPricing(); renderPayments(); renderServices(); renderMore(); renderPartnerSummary(); renderScheduled();
+  renderStats(S.stats); renderPricing(); renderPayments(); renderServices(); renderMore(); renderPartnerSummary(); renderScheduled(); renderLedger();
   updateSavebar();
 }
 function renderStats(st) {
@@ -675,7 +694,7 @@ async function doReset() {
 function fmtVal(v) { if (v === true) return "مفعّل"; if (v === false) return "مُطفأ"; if (v == null || v === "") return "—"; if (typeof v === "object") return JSON.stringify(v); return String(v).length > 40 ? String(v).slice(0,40)+"…" : String(v); }
 
 /* ───────── dirty / save ───────── */
-const tabSections = {home:[], pricing:["pricing","general"], pay:["payments"], services:["services","general"], scheduled:[], more:["general"]};
+const tabSections = {home:[], pricing:["pricing","general"], pay:["payments"], services:["services","general"], ledger:[], scheduled:[], more:["general"]};
 function markDirty(section) { dirty[section] = true; updateSavebar(); }
 function refreshSection(section) { if (section === "pricing") renderPricing(); else if (section === "general") { fillInputs("general"); } }
 function currentDirty() { return tabSections[tab].filter(s => dirty[s]); }
@@ -695,7 +714,25 @@ async function saveSection() {
   } catch (e) { toast(e.message, true); $("#save-msg").textContent = "● تغيير غير محفوظ"; }
   btn.disabled = false; $("#save-msg").textContent = "● تغيير غير محفوظ"; updateSavebar();
 }
-$$(".tab").forEach(b => b.addEventListener("click", () => { tab = b.dataset.tab; $$(".tab").forEach(x => x.classList.toggle("on", x === b)); ["home","pricing","pay","services","scheduled","more"].forEach(t => $("#tab-"+t).classList.toggle("hidden", t !== tab)); window.scrollTo(0,0); updateSavebar(); }));
+$$(".tab").forEach(b => b.addEventListener("click", () => { tab = b.dataset.tab; $$(".tab").forEach(x => x.classList.toggle("on", x === b)); ["home","pricing","pay","services","ledger","scheduled","more"].forEach(t => $("#tab-"+t).classList.toggle("hidden", t !== tab)); if(tab === "ledger") loadLedger(1); window.scrollTo(0,0); updateSavebar(); }));
+/* ───────── السجل المالي ───────── */
+let ledgerPeriod = "7d", ledgerPage = 1;
+const ledgerLabels = {topup:"إيداع", order_charge:"خصم طلب", refund:"استرداد", referral:"إحالة", adjustment:"تعديل إداري"};
+function renderLedger(){ if($("#ledger-list")) loadLedger(ledgerPage); }
+async function loadLedger(page=1){
+  ledgerPage=page; const q=$("#ledger-search")?.value||"", type=$("#ledger-type")?.value||"";
+  try{
+    const r=await api("ledger",{q,type,period:ledgerPeriod,page});
+    $("#ledger-in").textContent=money(r.incoming); $("#ledger-out").textContent=money(r.outgoing); $("#ledger-net").textContent=money(r.net);
+    $("#ledger-pending").textContent=(r.pending_topups?"📥 "+r.pending_topups+" شحنات معلّقة":"لا شحنات معلّقة");
+    const box=$("#ledger-list");
+    box.innerHTML=r.items.length?r.items.map(x=>{ const n=Number(x.amount_usd)||0, positive=n>=0; const user=(x.user_username?"@"+esc(x.user_username):esc(x.user_name||("ID "+x.user_id))); return `<div class="row" style="align-items:flex-start;cursor:pointer" data-ledger-user="${x.user_id}"><div class="lbl"><b style="color:${positive?'var(--ok)':'var(--bad)'}">${positive?'+':'−'}${money(Math.abs(n))} · ${ledgerLabels[x.type]||esc(x.type)}</b><span class="h">${user} · ID ${x.user_id}${x.note?" · "+esc(x.note):""}</span><span class="h">${x.ref_type||""}${x.ref_id?" #"+x.ref_id:""}${x.admin_id?" · أدمن "+x.admin_id:""} · ${x.created_at?new Date(x.created_at).toLocaleString('ar-SY'):"—"}</span></div><span class="chip">${positive?'داخل':'خارج'}</span></div>`;}).join(""):`<div class="empty">لا توجد حركات مالية ضمن الفلتر.</div>`;
+    $$('[data-ledger-user]',box).forEach(el=>el.onclick=()=>{tab='scheduled'; $$(".tab").forEach(x=>x.classList.toggle("on",x.dataset.tab==='scheduled')); ["home","pricing","pay","services","ledger","scheduled","more"].forEach(t=>$("#tab-"+t).classList.toggle("hidden",t!=='scheduled')); $("#sd-users-search").value=el.dataset.ledgerUser; sdLoadUsers();});
+    const nav=$("#ledger-nav"); nav.innerHTML=""; if(r.pages>1){ if(r.page>1) nav.insertAdjacentHTML('beforeend',`<button class="btn g sm" onclick="loadLedger(${r.page-1})">◀️ السابق</button>`); nav.insertAdjacentHTML('beforeend',`<span class="chip on">${r.page} / ${r.pages}</span>`); if(r.page<r.pages) nav.insertAdjacentHTML('beforeend',`<button class="btn g sm" onclick="loadLedger(${r.page+1})">التالي ▶️</button>`); }
+  }catch(e){toast(e.message,true);}
+}
+$$("[data-ledger-period]").forEach(el=>el.addEventListener("click",()=>{ledgerPeriod=el.dataset.ledgerPeriod; $$("[data-ledger-period]").forEach(x=>x.classList.toggle("on",x===el)); loadLedger(1);}));
+
 /* ───────── التصميم اليومي المجدول ───────── */
 let SDP = null, SD_DETAIL = null;
 const sdMoney = x => money(x || 0);
@@ -736,7 +773,8 @@ function sdCloseDetail(){ SD_DETAIL=null; $("#sd-detail").classList.add("hidden"
 async function sdSaveItem(sid,seq,hasFile){ const file=$("#sd-file-"+seq).files[0], text=$("#sd-text-"+seq).value||""; try { let r; if(file){ const f=new FormData(); f.append('subscription_id',sid); f.append('seq',seq); f.append('copy_text',text); f.append('file',file); r=await apiMultipart('scheduled/upload',f); } else { const old=(SD_DETAIL.items||[]).find(x=>Number(x.seq)===Number(seq)); if(!old||!old.file_id){toast('أرفق ملف التصميم أولاً',true);return;} r=await api('scheduled/content',{subscription_id:sid,seq,file_kind:old.file_kind,file_id:old.file_id,copy_text:text}); } SD_DETAIL=await api('scheduled/detail',{id:sid}); sdRenderDetail(); toast('✅ حُفظ التصميم والنص'); } catch(e){toast(e.message,true);} }
 async function sdActivate(id){ try { const r=await api('scheduled/activate',{id,start_date:$("#sd-start").value,send_time:$("#sd-time").value}); SD_DETAIL=r.subscription; sdRenderDetail(); toast('✅ فُعّلت الجدولة'); } catch(e){toast(e.message,true);} }
 async function sdAction(id,action){ if(action==='cancel' && !(await ask('إلغاء هذه الباقة؟'))) return; try { const r=await api('scheduled/action',{id,action}); SD_DETAIL=r.subscription; sdRenderDetail(); sdLoadSubscribers(); toast('✅ تم التحديث'); } catch(e){toast(e.message,true);} }
-async function sdLoadUsers(){ const q=$("#sd-users-search").value||""; try { const r=await api('users/directory',{q,page:1}); const box=$("#sd-users"); box.innerHTML=r.items.length?r.items.map(u=>`<div class="row"><div class="lbl"><b>${esc(u.name||"بدون اسم")}</b><span class="h">${u.username?"@"+esc(u.username):"بدون @username"} · ID ${u.tg_id} · آخر ظهور ${u.last_seen?new Date(u.last_seen).toLocaleString('ar-SY'):"—"}</span></div><span class="chip">رصيد ${sdMoney(u.balance_usd)}</span></div>`).join(""):`<div class="empty">لا يوجد مستخدمون مطابقون.</div>`; } catch(e){toast(e.message,true);} }
+async function sdLoadUsers(){ const q=$("#sd-users-search").value||""; try { const r=await api('users/directory',{q,page:1}); const box=$("#sd-users"); box.innerHTML=r.items.length?r.items.map(u=>`<div class="row" data-sd-user="${u.tg_id}" style="cursor:pointer"><div class="lbl"><b>${esc(u.name||"بدون اسم")}</b><span class="h">${u.username?"@"+esc(u.username):"بدون @username"} · ID ${u.tg_id} · آخر ظهور ${u.last_seen?new Date(u.last_seen).toLocaleString('ar-SY'):"—"}</span></div><span class="chip">رصيد ${sdMoney(u.balance_usd)}</span></div>`).join(""):`<div class="empty">لا يوجد مستخدمون مطابقون.</div>`; $$('[data-sd-user]',box).forEach(x=>x.onclick=()=>sdShowLedger(Number(x.dataset.sdUser))); } catch(e){toast(e.message,true);} }
+async function sdShowLedger(uid){ try { const r=await api('users/ledger',{user_id:uid}); const b=$("#sd-user-ledger"); b.classList.remove('hidden'); const labels={topup:'إيداع',order_charge:'خصم طلب',refund:'استرداد',referral:'إحالة',adjustment:'تعديل'}; b.innerHTML=`<div class="ctitle">🧾 السجل المالي · ${esc(r.user.name||'')} · ID ${r.user.tg_id}</div><div class="row"><b>الرصيد الحالي</b><b>${sdMoney(r.user.balance_usd)}</b></div>`+(r.rows.length?r.rows.map(x=>`<div class="row"><div class="lbl"><b>${Number(x.amount_usd)>=0?'+':'−'}${sdMoney(Math.abs(Number(x.amount_usd)))} · ${labels[x.type]||esc(x.type)}</b><span class="h">${esc(x.note||'')} · ${x.created_at?new Date(x.created_at).toLocaleString('ar-SY'):''}${x.admin_id?' · أدمن '+x.admin_id:''}</span></div><span class="small">${x.ref_type||''}${x.ref_id?' #'+x.ref_id:''}</span></div>`).join(''):`<div class="empty">لا توجد حركات مالية.</div>`); window.scrollTo(0,document.body.scrollHeight); } catch(e){toast(e.message,true);} }
 async function apiMultipart(path, form){ const r=await fetch('/cpanel/api/'+path,{method:'POST',headers:{'X-Telegram-Init-Data':initData},body:form}); let d={}; try{d=await r.json();}catch(e){} if(!r.ok){const er=new Error(d.message||('خطأ '+r.status));er.code=d.error||r.status;throw er;} return d; }
 
 /* ───────── partner channels ───────── */

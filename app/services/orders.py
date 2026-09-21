@@ -108,8 +108,8 @@ def compute_prices(spec: dict) -> tuple[Decimal, Decimal, Decimal]:
     return budget, money(price), cost
 
 
-def build_nour_payload(order: dict, fallback_username: str) -> dict:
-    """يحوّل spec إلى جسم POST /campaigns كما تريده وثائق نور (النمط A)."""
+def build_nour_payload(order: dict, fallback_username: str = "") -> dict:
+    """يحوّل spec إلى جسم POST /campaigns؛ fallback_username محفوظ للتوافق ولا يُرسل للعميل بدلاً من معرفه."""
     spec = order["spec"]
     daily = Decimal(str(spec["daily"]))
     platform = spec["platform"]
@@ -119,7 +119,9 @@ def build_nour_payload(order: dict, fallback_username: str) -> dict:
         "goal": spec.get("goal", "post_promotion"),
         "duration_days": int(spec["days"]),
         "whatsapp_number": spec["whatsapp"],
-        "telegram_username": spec.get("tg_username") or fallback_username,
+        # لا نرسل معرف الأدمن كبديل: إذا لم يملك العميل @username يتواصل Nour معه عبر واتساب فقط.
+        # Telegram ID الرقمي لا يمكن لـ Nour استخدامه لبدء محادثة خارج البوت.
+        "telegram_username": spec.get("tg_username") or "",
         "targeting": {
             "countries": {spec["country"]: TG.validate_provinces(spec["country"], spec.get("provinces") or ["all"])},
             "gender": spec.get("gender", "all"),
@@ -189,8 +191,7 @@ async def submit(order_id: int) -> dict:
     order = await repo.get(order_id)
     if not order or order["status"] != "paid" or order.get("kind") != "meta_campaign":
         return order
-    fallback = await settings_repo.get("admin_fallback_username", "") or ""
-    payload = build_nour_payload(order, fallback)
+    payload = build_nour_payload(order)
     key = order.get("idempotency_key") or f"ord-{order_id}"
     attempts = int(order.get("submit_attempts") or 0) + 1
     client = nour.client()

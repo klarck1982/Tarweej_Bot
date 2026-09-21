@@ -19,6 +19,7 @@ from __future__ import annotations
 import html
 import json
 import logging
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from aiogram import Bot
@@ -391,6 +392,73 @@ async def scheduled_action(request: web.Request) -> web.Response:
     return _json({"ok": True, "subscription": await SD.detail(sid)})
 
 
+async def financial_ledger(request: web.Request) -> web.Response:
+    _auth(request)
+    body = await _body(request)
+    q = str(body.get("q") or "").strip().lstrip("@")[:100].lower()
+    kind = str(body.get("type") or "").strip()
+    if kind not in ("", "topup", "order_charge", "refund", "referral", "adjustment"):
+        kind = ""
+    period = str(body.get("period") or "7d")
+    days = {"today": 1, "7d": 7, "30d": 30, "all": None}.get(period, 7)
+    since = datetime.now(timezone.utc) - timedelta(days=days) if days else None
+    page = max(1, int(body.get("page") or 1))
+    limit = 50
+    offset = (page - 1) * limit
+    where = [
+        "($1 = '' OR lower(coalesce(u.name,'')) LIKE '%'||$1||'%' OR lower(coalesce(u.username,'')) LIKE '%'||$1||'%' OR l.user_id::text=$1 OR coalesce(l.ref_id::text,'')=$1)",
+        "($2 = '' OR l.type = $2)",
+        "($3::timestamptz IS NULL OR l.created_at >= $3)",
+    ]
+    args = [q, kind, since]
+    rows = await db.fetch(
+        """
+        SELECT l.id, l.user_id, l.type, l.amount_usd, l.ref_type, l.ref_id,
+               l.note, l.admin_id, l.created_at,
+               u.name AS user_name, u.username AS user_username
+        FROM ledger l JOIN users u ON u.tg_id = l.user_id
+        WHERE """ + " AND ".join(where) + " ORDER BY l.id DESC LIMIT $4 OFFSET $5",
+        *args, limit, offset,
+    )
+    count = await db.fetchval(
+        "SELECT count(*) FROM ledger l JOIN users u ON u.tg_id=l.user_id WHERE " + " AND ".join(where), *args
+    )
+    totals = await db.fetchrow(
+        """
+        SELECT coalesce(sum(CASE WHEN l.amount_usd > 0 THEN l.amount_usd ELSE 0 END),0) AS incoming,
+               coalesce(sum(CASE WHEN l.amount_usd < 0 THEN -l.amount_usd ELSE 0 END),0) AS outgoing,
+               coalesce(sum(l.amount_usd),0) AS net
+        FROM ledger l JOIN users u ON u.tg_id=l.user_id
+        WHERE """ + " AND ".join(where), *args,
+    )
+    pending = await db.fetchval("SELECT count(*) FROM topups WHERE status='pending'") or 0
+    return _json({
+        "items": [dict(r) for r in rows], "count": int(count or 0), "page": page,
+        "pages": max(1, (int(count or 0) + limit - 1) // limit), "period": period,
+        "incoming": totals["incoming"], "outgoing": totals["outgoing"], "net": totals["net"],
+        "pending_topups": int(pending),
+    })
+
+
+async def users_ledger(request: web.Request) -> web.Response:
+    _auth(request)
+    body = await _body(request)
+    try:
+        uid = int(body.get("user_id") or 0)
+    except (TypeError, ValueError):
+        uid = 0
+    if uid <= 0:
+        return _json({"error": "invalid", "message": "معرف المستخدم غير صالح"}, 400)
+    user = await db.fetchrow("SELECT tg_id, name, username, balance_usd FROM users WHERE tg_id=$1", uid)
+    if not user:
+        return _json({"error": "missing", "message": "المستخدم غير موجود"}, 404)
+    rows = await db.fetch(
+        "SELECT id, type, amount_usd, ref_type, ref_id, note, admin_id, created_at "
+        "FROM ledger WHERE user_id=$1 ORDER BY id DESC LIMIT 100", uid,
+    )
+    return _json({"user": dict(user), "rows": [dict(r) for r in rows]})
+
+
 async def users_directory(request: web.Request) -> web.Response:
     _auth(request)
     body = await _body(request)
@@ -438,5 +506,7 @@ def setup_cpanel(app: web.Application, bot: Bot) -> None:
     app.router.add_post("/cpanel/api/scheduled/upload", make_scheduled_upload(bot))
     app.router.add_post("/cpanel/api/scheduled/activate", scheduled_activate)
     app.router.add_post("/cpanel/api/scheduled/action", scheduled_action)
+    app.router.add_post("/cpanel/api/ledger", financial_ledger)
     app.router.add_post("/cpanel/api/users/directory", users_directory)
+    app.router.add_post("/cpanel/api/users/ledger", users_ledger)
     app.router.add_post("/cpanel/api/channel_test", make_channel_test(bot))
