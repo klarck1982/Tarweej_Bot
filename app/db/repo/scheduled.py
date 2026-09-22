@@ -3,10 +3,22 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime
+from datetime import datetime, time
 from decimal import Decimal
 
 from app.db import pool as db
+
+
+def _time_value(value: str | time) -> time:
+    """asyncpg يرسل TIME كـ datetime.time وليس كسلسلة نصية."""
+    if isinstance(value, time):
+        return value.replace(second=0, microsecond=0)
+    raw = str(value or "20:00").strip()
+    try:
+        hour, minute = (int(x) for x in raw.split(":", 1))
+        return time(hour, minute)
+    except (ValueError, TypeError):
+        raise ValueError("وقت الإرسال يجب أن يكون بصيغة HH:MM") from None
 
 
 def _j(value):
@@ -148,7 +160,7 @@ async def activate(subscription_id: int, start_at: datetime, send_time: str, sch
                     last_error = NULL, updated_at = now(), completed_at = NULL
                 WHERE id = $1 RETURNING *
                 """,
-                subscription_id, start_at, send_time, first,
+                subscription_id, start_at, _time_value(send_time), first,
             )
     return _row(row)
 
@@ -192,7 +204,7 @@ async def update_schedule(subscription_id: int, send_time: str, start_at: dateti
                     updated_at=now()
                 WHERE id=$1 RETURNING *
                 """,
-                subscription_id, send_time, start_at, first,
+                subscription_id, _time_value(send_time), start_at, first,
             )
     return _row(row)
 

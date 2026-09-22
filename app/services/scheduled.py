@@ -22,6 +22,18 @@ def _defaults() -> list[dict]:
     return []
 
 
+def _time_value(value: Any) -> time:
+    """حوّل HH:MM إلى datetime.time قبل تمريره إلى asyncpg."""
+    if isinstance(value, time):
+        return value.replace(second=0, microsecond=0)
+    raw = str(value or "20:00").strip()
+    try:
+        hour, minute = (int(x) for x in raw.split(":", 1))
+        return time(hour, minute)
+    except (ValueError, TypeError):
+        raise ValueError("وقت الإرسال يجب أن يكون بصيغة HH:MM") from None
+
+
 async def packages(include_disabled: bool = True) -> list[dict]:
     value = await settings_repo.get(PACKAGES_KEY, _defaults())
     rows = value if isinstance(value, list) else []
@@ -67,11 +79,7 @@ def validate_package(raw: dict) -> dict:
     if not 1 <= days <= 365 or days < total:
         raise ValueError("مدة الباقة يجب أن تكون بين 1 و365 وألا تقل عن عدد التسليمات")
     send_time = str(raw.get("send_time") or "20:00").strip()
-    try:
-        hour, minute = (int(x) for x in send_time.split(":", 1))
-        time(hour, minute)
-    except (ValueError, TypeError):
-        raise ValueError("وقت الإرسال يجب أن يكون بصيغة HH:MM") from None
+    parsed_time = _time_value(send_time)
     return {
         "code": code,
         "title": title,
@@ -79,7 +87,7 @@ def validate_package(raw: dict) -> dict:
         "price_usd": f"{price:.2f}",
         "total_items": total,
         "duration_days": days,
-        "send_time": f"{hour:02d}:{minute:02d}",
+        "send_time": parsed_time.strftime("%H:%M"),
         "timezone": str(raw.get("timezone") or DEFAULT_TIMEZONE)[:64],
         "include_copy": bool(raw.get("include_copy", True)),
         "enabled": bool(raw.get("enabled", True)),
@@ -163,7 +171,7 @@ async def purchase(user_id: int, code: str) -> dict:
                 RETURNING id
                 """,
                 user_id, order["id"], package["code"], package["title"], price,
-                int(package["total_items"]), int(package["duration_days"]), package["send_time"],
+                int(package["total_items"]), int(package["duration_days"]), _time_value(package.get("send_time")),
                 package.get("timezone") or DEFAULT_TIMEZONE,
             )
             await c.execute("UPDATE orders SET scheduled_subscription_id=$2 WHERE id=$1", order["id"], sub["id"])

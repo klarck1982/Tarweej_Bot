@@ -23,6 +23,19 @@ def test_validate_scheduled_package():
     assert p["send_time"] == "20:00"
 
 
+def test_send_time_is_normalized_for_database_time_values():
+    p = SD.validate_package({
+        "code": "design30",
+        "title": "تصميم يومي 30",
+        "price_usd": "30",
+        "total_items": 30,
+        "duration_days": 30,
+        "send_time": "08:05",
+    })
+    assert SD._time_value(p["send_time"]).hour == 8
+    assert SD._time_value(p["send_time"]).minute == 5
+
+
 def test_schedule_times_use_damascus_timezone_and_utc_storage():
     start, times = SD.schedule_times(3, "2026-09-21", "20:00", "Asia/Damascus")
     assert start.tzinfo == timezone.utc
