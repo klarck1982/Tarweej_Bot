@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+import logging
+
 from aiogram import F, Router
 from aiogram.types import CallbackQuery
+
+log = logging.getLogger("scheduled")
 
 from app.bot import keyboards as K
 from app.bot import texts as T
@@ -94,6 +98,9 @@ async def cb_confirm(cb: CallbackQuery) -> None:
         await cb.answer(str(e), show_alert=True)
         return
     except Exception:
+        # لا نُظهر تفاصيل قاعدة البيانات للعميل، لكن نسجل السبب مع المستخدم
+        # والباقة حتى يظهر السبب الحقيقي في Render بدلاً من رسالة عامة فقط.
+        log.exception("scheduled purchase failed user=%s code=%s", cb.from_user.id, code)
         await cb.answer("تعذر إنشاء الاشتراك الآن. حاول مرة أخرى.", show_alert=True)
         return
     await notify.notify_admins_new_subscriber(cb.bot, subscription)
