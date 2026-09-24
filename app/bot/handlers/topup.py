@@ -182,13 +182,10 @@ async def _create_and_show(message: Message, uid: int, amount: Decimal, state: F
 
 
 def _parse_amount(raw: str) -> Decimal | None:
-    raw = raw.strip().replace("$", "").replace("،", ".").replace(",", ".")
-    # أرقام عربية → لاتينية
-    raw = raw.translate(str.maketrans("٠١٢٣٤٥٦٧٨٩", "0123456789"))
-    try:
-        return money(Decimal(raw))
-    except (InvalidOperation, ValueError):
-        return None
+    # v0.9.2: صارم — 5.555 و 1e3 و NaN مرفوضة (كانت تُقرَّب بصمت)
+    from app.services import validators as V
+    v = V.parse_usd(raw)
+    return money(v) if v is not None else None
 
 
 @router.callback_query(Topup.amount, F.data == "bal:amt:type")

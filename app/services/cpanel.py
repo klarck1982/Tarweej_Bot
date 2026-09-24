@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import re
 import time
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
@@ -212,7 +213,10 @@ async def save_general(clean: dict, admin_id: int) -> list[str]:
 
 async def save_pricing(raw: dict, admin_id: int) -> list[str]:
     clean = P.validate(raw)
-    before = P.validate(P.current())   # نطبّع النسخة الحالية بنفس الطريقة حتى لا يُسجَّل "تغيير" شكلي (10 → 10.00)
+    try:
+        before = P.validate(P.current())   # نطبّع النسخة الحالية بنفس الطريقة حتى لا يُسجَّل "تغيير" شكلي (10 → 10.00)
+    except ValueError:   # قيمة قديمة لم تعد تجتاز التحقق (مثل سعر 0) — نسجّل الفرق كما هو
+        before = P.current()
     await settings_repo.set_("pricing", clean)
     await P.refresh()
     changed = _diff_keys(before, clean)
@@ -239,6 +243,13 @@ _EDITABLE = ("enabled", "address", "holder")
 
 async def save_payments(raw: dict, admin_id: int) -> list[str]:
     methods = await PM.get_methods()
+    # v0.9.2: تحقق كامل قبل أي تعديل/تدقيق — طلب فيه عنوان خاطئ يُرفض كله
+    for code, m in methods.items():
+        upd = raw.get(code)
+        new_addr = str((upd or {}).get("address") or "").strip()[:200] if isinstance(upd, dict) else ""
+        if new_addr and new_addr != (m.get("address") or ""):   # نتحقق مما تغيّر فقط
+            if not PM.clean_address(m, new_addr):
+                raise ValueError(f"{m.get('title', code)}: " + re.sub(r"<[^>]+>", "", PM.address_hint(m)))
     changed = []
     for code, m in methods.items():
         upd = raw.get(code)
@@ -248,6 +259,8 @@ async def save_payments(raw: dict, admin_id: int) -> list[str]:
             if f not in upd:
                 continue
             v = bool(upd[f]) if f == "enabled" else str(upd[f] or "").strip()[:200]
+            if f == "address" and v:
+                v = PM.clean_address(m, v) or v   # سبق التحقق أعلاه — هنا التطبيع فقط
             if m.get(f, "" if f != "enabled" else True) != v:
                 await audit(admin_id, "payments", f"{code}.{f}", m.get(f), v)
                 m[f] = v

@@ -55,7 +55,9 @@ FUZZ_MEDIA = ["photo", "document", "video", "sticker"]
 SKIP_PREFIX = ()  # لا شيء — بيئة معزولة، نجرّب كل شيء
 PER_PREFIX_CAP = 6
 # حقول نص حر: قبول «0» أو «abc» فيها طبيعي
-FREE_TEXT = {"AdminOrder:refund_reason", "AdminOrder:message_user", "AdminOrder:tga_revision", "AdminOrder:tga_reject",
+# «٥٠» = 50 بأرقام عربية: قبوله صحيح (تطبيع مقصود) — لا يُحسب قبولاً خاطئاً
+VALID_EQUIV = {"٥٠"}
+FREE_TEXT = {"TgPost:when", "AdminOrder:refund_reason", "AdminOrder:message_user", "AdminOrder:tga_revision", "AdminOrder:tga_reject",
              "AdminOrder:tga_text", "AdminOrder:tgp_reject", "AdminOrder:tgp_text", "AdminDesign:reject",
              "AdminTools:ticket_reply", "AdminTools:broadcast_text", "AdminTopup:reject_reason", "AdminTopup:message_user",
              "AdminTopup:wallet_holder", "ClientTicket:message", "ClientTicket:reply", "Design:notes", "Design:revision",
@@ -109,17 +111,19 @@ class Crawler:
             self.states_seen.add(st)
             if self.fuzz and st not in self.fuzzed_states:
                 self.fuzzed_states.add(st)
+                accepted = None
                 for f in FUZZ_TEXT + FUZZ_MEDIA:
                     await self.feed(f)
                     if await self.a.state() != st:
+                        accepted = f
                         break   # مدخل «سيئ» قُبل! نسجّله إن كان رقماً سالباً/صفراً في حقل مبلغ
                 now = await self.a.state()
-                if now != st and st not in FREE_TEXT:
-                    ISSUES.add("medium", "fuzz-accepted", f"الحالة {st} قبلت مدخلاً غير متوقع (آخر مدخل من قائمة الاختبار) وانتقلت إلى {now}")
+                if now != st and st not in FREE_TEXT and accepted not in VALID_EQUIV and not str(now).endswith("_confirm"):
+                    ISSUES.add("medium", "fuzz-accepted", f"الحالة {st} قبلت المدخل {str(accepted)[:30]!r} وانتقلت إلى {now}")
                     st = now
                     continue
             vals = VALID.get(st)
-            if st.endswith((":choosing", ":broadcast_audience", ":broadcast_confirm")):
+            if st.endswith((":choosing", ":broadcast_audience", ":broadcast_confirm", "_confirm")):
                 return  # خطوات بالأزرار فقط
             if not vals:
                 ISSUES.add("low", "crawler-no-input", f"لا يوجد مدخل صالح معروف للحالة {st}")

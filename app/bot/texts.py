@@ -278,7 +278,7 @@ TOPUP_AMOUNT = (
 )
 TOPUP_AMOUNT_SYP_NOTE = "\n\n💱 سعر اليوم: <b>1$ = {rate} ل.س</b> — تكتب المبلغ بالدولار ونحسب لك المعادل بالليرة."
 TOPUP_AMOUNT_SUGGEST = "\n\n💡 لإكمال طلبك المعلّق ينقصك <b>{gap}</b> — اقترحنا لك المبلغ المناسب."
-TOPUP_AMOUNT_INVALID = "المبلغ مو واضح — اكتب رقماً فقط، مثل <code>10</code> أو <code>25.5</code>"
+TOPUP_AMOUNT_INVALID = "المبلغ مو واضح — اكتب رقماً فقط بمنزلتين عشريتين كحد أقصى، مثل <code>10</code> أو <code>25.5</code>"
 TOPUP_AMOUNT_TOO_LOW = "الحد الأدنى للشحن <b>{min}</b> 🙂"
 TOPUP_AMOUNT_TOO_HIGH = "للمبالغ فوق <b>{max}</b> تواصل مع الدعم لترتيب التحويل."
 

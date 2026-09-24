@@ -77,5 +77,13 @@ def parse_int(raw: str) -> int | None:
 
 
 def parse_decimal_str(raw: str) -> str | None:
-    s = normalize_digits(raw).strip().replace("$", "").replace("،", ".").replace(",", ".")
+    s = normalize_digits(raw).strip().replace("$", "").replace("٫", ".").replace("،", ".").replace(",", ".").strip()
     return s if re.match(r"^\d+(\.\d{1,2})?$", s) else None
+
+
+def parse_usd(raw: str):
+    """مبلغ دولار صارم (v0.9.2): أرقام لاتينية/عربية، منزلتان عشريتان كحد أقصى، بلا 1e3/NaN/Infinity/سالب.
+    يعيد Decimal أو None — لا تقريب صامت (5.555 مرفوض بدل أن يصبح 5.56)."""
+    from decimal import Decimal
+    s = parse_decimal_str(str(raw or ""))
+    return Decimal(s) if s is not None else None

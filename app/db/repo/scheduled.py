@@ -209,24 +209,42 @@ async def update_schedule(subscription_id: int, send_time: str, start_at: dateti
     return _row(row)
 
 
+CATCHUP_GAP_MINUTES = 60   # v0.9.2: بعد تأخر (توقف الخادم/تفعيل بتاريخ ماضٍ) نرسل تسليماً واحداً كل ساعة للمشترك
+
+
 async def due_item(limit: int = 1) -> dict | None:
-    """يحجز تسليماً واحداً حتى لا ترسله نسختان من scheduler معاً."""
+    """يحجز تسليماً واحداً حتى لا ترسله نسختان من scheduler معاً.
+
+    v0.9.2: لا يُختار مشترك استلم تسليماً خلال آخر CATCHUP_GAP_MINUTES دقيقة — فالتصاميم المتأخرة
+    تصل تباعاً (واحد كل ساعة) بدل دفعة واحدة من 7 رسائل. الجدول اليومي العادي لا يتأثر.
+    overdue_count = عدد التسليمات المستحقة لهذا المشترك الآن (لتنبيه الأدمن بالتأخر)."""
     async with db.pool().acquire() as c:
         async with c.transaction():
             row = await c.fetchrow(
                 """
                 SELECT i.*, s.user_id, s.id AS subscription_id, s.package_title, s.total_items,
-                       s.sent_count, s.status AS subscription_status
+                       s.sent_count, s.status AS subscription_status,
+                       (SELECT count(*) FROM scheduled_subscription_items o
+                         WHERE o.subscription_id = s.id AND o.status = 'pending' AND o.scheduled_at <= now()) AS overdue_count
                 FROM scheduled_subscription_items i
                 JOIN scheduled_subscriptions s ON s.id = i.subscription_id
                 WHERE s.status = 'scheduled'
-                  AND ((i.status = 'pending' AND i.scheduled_at <= now())
+                  AND ((i.status = 'pending' AND i.scheduled_at <= now()
+                        -- v0.9.2: مهلة بين المحاولات (10 د ثم 20 د) — عطل عابر لا يستهلك المحاولات الثلاث في ثوانٍ
+                        AND (i.attempts = 0 OR i.updated_at <= now() - make_interval(mins => 10 * i.attempts)))
                        OR (i.status = 'sending' AND i.updated_at < now() - interval '15 minutes'))
-                ORDER BY i.scheduled_at NULLS LAST, i.id
-                FOR UPDATE SKIP LOCKED
+                  AND NOT EXISTS (SELECT 1 FROM scheduled_subscription_items r
+                                   WHERE r.subscription_id = s.id AND r.status = 'sent'
+                                     AND r.sent_at > now() - make_interval(mins => $2))
+                  -- الترتيب مضمون: لا يُرسل التسليم n وتسليم أسبق ما زال ينتظر (مهلة إعادة المحاولة مثلاً)
+                  AND NOT EXISTS (SELECT 1 FROM scheduled_subscription_items e
+                                   WHERE e.subscription_id = s.id AND e.seq < i.seq
+                                     AND e.status IN ('pending', 'sending'))
+                ORDER BY i.scheduled_at NULLS LAST, i.seq, i.id
+                FOR UPDATE OF i SKIP LOCKED
                 LIMIT $1
                 """,
-                max(1, min(int(limit), 10)),
+                max(1, min(int(limit), 10)), CATCHUP_GAP_MINUTES,
             )
             if not row:
                 return None

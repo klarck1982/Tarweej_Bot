@@ -222,6 +222,10 @@ def _dec(v: Any, name: str, lo: Decimal, hi: Decimal) -> Decimal:
     return d
 
 
+# v0.9.2: أي سعر خدمة مدفوعة ≥ 1$ — صفر بالخطأ في Cpanel كان يجعل الخدمة مجانية بلا تنبيه
+MIN_PRICE = D("1")
+
+
 def validate(raw: dict) -> dict:
     """يعيد نسخة نظيفة قابلة للحفظ أو يرمي ValueError برسالة عربية واضحة."""
     cfg = merged(raw)
@@ -297,7 +301,7 @@ def validate(raw: dict) -> dict:
         if not 1 <= hours <= 240:
             raise ValueError(f"إضافة «{a.get('title', code)}»: مدة التسليم بين 1 و 240 ساعة")
         clean_addons[code] = {"title": str(a.get("title") or code)[:24], "emoji": str(a.get("emoji") or "✨")[:4],
-                              "price": str(_dec(a["price"], f"سعر «{a.get('title', code)}»", D("0"), D("10000"))), "hours": hours}
+                              "price": str(_dec(a["price"], f"سعر «{a.get('title', code)}»", MIN_PRICE, D("10000"))), "hours": hours}
     for core in ADDON_ORDER:
         if core not in clean_addons:
             raise ValueError(f"الإضافة الأساسية «{core}» لا تُحذف")
@@ -307,12 +311,12 @@ def validate(raw: dict) -> dict:
         items = [c for c in (x.get("items") or []) if c in clean_addons] or bundle_items_from_title(str(x.get("title") or ""))
         if len(items) > 6:
             raise ValueError("باقة إضافات: حتى 6 عناصر")
-        clean_ab.append({"title": str(x.get("title") or "")[:40],
-                         "price": str(_dec(x["price"], "سعر باقة إضافات", D("0"), D("10000"))),
-                         "was": str(_dec(x["was"], "السعر قبل الخصم", D("0"), D("10000"))), "items": items})
+        ab_price = _dec(x["price"], "سعر باقة إضافات", MIN_PRICE, D("10000"))
+        ab_was = _dec(x["was"], "السعر قبل الخصم", ab_price, D("10000"))   # لا «خصم» يرفع السعر
+        clean_ab.append({"title": str(x.get("title") or "")[:40], "price": str(ab_price), "was": str(ab_was), "items": items})
 
     clean = {"meta": clean_meta, "packages": pkgs, "bundle": clean_bundle, "tg_ads": clean_tg, "tg_post": clean_tp,
-             "addons": clean_addons, "voiceover": str(_dec(cfg["voiceover"], "التعليق الصوتي", D("0"), D("1000"))),
+             "addons": clean_addons, "voiceover": str(_dec(cfg["voiceover"], "التعليق الصوتي", MIN_PRICE, D("1000"))),
              "addon_bundles": clean_ab}
     _build(clean)  # يجب أن يُبنى بلا أخطاء
     return clean

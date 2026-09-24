@@ -142,13 +142,36 @@ def proof_ok(m: dict, text: str) -> bool:
     return bool(_PROOF_RE.get(m.get("kind", "crypto"), _PROOF_RE["crypto"]).match(text.strip()))
 
 
+# v0.9.2: صيغة صارمة لكل شبكة — عنوان من شبكة أخرى يعني ضياع أموال العملاء نهائياً
+_NETWORK_RE = {
+    "TRC20": re.compile(r"T[1-9A-HJ-NP-Za-km-z]{33}"),        # Tron: Base58 يبدأ بـ T، طوله 34
+    "BEP20": re.compile(r"0x[0-9a-fA-F]{40}"),                 # BNB Smart Chain (صيغة EVM)
+    "ERC20": re.compile(r"0x[0-9a-fA-F]{40}"),
+}
+NETWORK_HINT = {
+    "TRC20": "عنوان TRC20 يبدأ بحرف <b>T</b> وطوله 34 حرفاً (مثل <code>TXYZ…</code>).",
+    "BEP20": "عنوان BEP20 يبدأ بـ <b>0x</b> ويليه 40 رمزاً (0-9 و a-f).",
+    "ERC20": "عنوان ERC20 يبدأ بـ <b>0x</b> ويليه 40 رمزاً (0-9 و a-f).",
+}
+
+
 def clean_address(m: dict, raw: str) -> str | None:
     """يعيد العنوان/رقم الحساب منظّفاً أو None إن كان غير صالح."""
-    s = raw.strip().translate(_ARABIC_DIGITS)
+    s = str(raw or "").strip().translate(_ARABIC_DIGITS)
     if m.get("kind") == "shamcash":
         s = s.replace(" ", "")
         return s if re.fullmatch(r"[0-9A-Za-z+_\-]{4,40}", s) else None
+    rx = _NETWORK_RE.get(str(m.get("network") or "").upper())
+    if rx:
+        return s if rx.fullmatch(s) else None
     return s if (20 <= len(s) <= 120 and " " not in s) else None
+
+
+def address_hint(m: dict) -> str:
+    if m.get("kind") == "shamcash":
+        return "رقم الحساب مو واضح — أرسله أرقاماً/أحرفاً بلا مسافات."
+    return "العنوان غير صالح لهذه الشبكة — انسخه كاملاً من محفظتك.\n" + NETWORK_HINT.get(
+        str(m.get("network") or "").upper(), "بلا مسافات، 20 حرفاً على الأقل.")
 
 
 def parse_rate(raw: str) -> Decimal | None:

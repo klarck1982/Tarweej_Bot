@@ -1295,3 +1295,19 @@ def admin_topup_adjust_confirm(tid: int, amount: str) -> InlineKeyboardMarkup:
         [ib(f"✅ نعم، اعتمد {amount}", f"adm:top:{tid}:adjc", "success")],
         [ib("✏️ مبلغ آخر", f"adm:top:{tid}:adj"), ib("❌ إلغاء", "adm:cancel_input", "danger")],
     ])
+
+
+def admin_wallet_confirm(code: str) -> InlineKeyboardMarkup:
+    """مراجعة عنوان المحفظة قبل الحفظ (v0.9.2)."""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [ib("✅ صحيح — احفظه", f"adm:wal:{code}:save", "success")],
+        [ib("✏️ إعادة الإدخال", f"adm:wal:{code}:edit"), ib("❌ إلغاء", f"adm:wal:{code}", "danger")],
+    ])
+
+
+def admin_rate_confirm() -> InlineKeyboardMarkup:
+    """تأكيد تغيير كبير في سعر صرف الليرة (v0.9.2)."""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [ib("✅ نعم، السعر صحيح", "adm:rate:save", "success")],
+        [ib("✏️ إدخال آخر", "adm:rate"), ib("❌ إلغاء", "adm:wallets", "danger")],
+    ])

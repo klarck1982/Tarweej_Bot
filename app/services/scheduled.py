@@ -72,7 +72,7 @@ def validate_package(raw: dict) -> dict:
         days = int(raw.get("duration_days"))
     except (InvalidOperation, ValueError, TypeError):
         raise ValueError("السعر وعدد التصاميم والأيام يجب أن تكون أرقاماً صحيحة") from None
-    if price <= 0 or price > 100000:
+    if price < 1 or price > 100000:
         raise ValueError("السعر يجب أن يكون أكبر من صفر")
     if not 1 <= total <= 365:
         raise ValueError("عدد التسليمات بين 1 و365")
@@ -275,6 +275,8 @@ async def cancel(subscription_id: int, admin_id: int | None = None) -> dict | No
             sub = await c.fetchrow("SELECT * FROM scheduled_subscriptions WHERE id=$1 FOR UPDATE", subscription_id)
             if not sub or sub["status"] in ("cancelled", "refunded", "completed"):
                 return dict(sub) if sub else None
+            # v0.9.2: قفل صف المستخدم قبل إدراج ledger (الذي يأخذ KEY SHARE على users) — نفس ترتيب شراء/تأكيد الطلبات
+            await money.lock_user(c, int(sub["user_id"]))
             sent = int(await c.fetchval(
                 "SELECT count(*) FROM scheduled_subscription_items WHERE subscription_id=$1 AND status='sent'",
                 subscription_id,

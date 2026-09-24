@@ -74,6 +74,35 @@ async def cpanel_tests(env):
                             await post("/cpanel/api/save/pricing", pricing, ok)
                         elif st >= 500:
                             ISSUES.add("medium", "cpanel-500", f"pricing.{key}={bad!r} → {st} {str(j)[:120]}")
+            # أسعار متداخلة: إضافات التصميم وباقاتها
+            for path_desc, mutate in (
+                ("addons.copy.price=0", lambda b: b["addons"]["copy"].__setitem__("price", "0")),
+                ("addon_bundles[0].price=0", lambda b: b["addon_bundles"][0].__setitem__("price", "0")),
+                ("addon_bundles[0].was<price", lambda b: b["addon_bundles"][0].__setitem__("was", "1")),
+            ):
+                body = copy.deepcopy(pricing)
+                try:
+                    mutate(body)
+                except (KeyError, IndexError, TypeError):
+                    continue
+                ISSUES.context = f"cpanel pricing.{path_desc}"
+                st, j = await post("/cpanel/api/save/pricing", body, ok)
+                if st == 200:
+                    ISSUES.add("high", "cpanel-pricing-accepted", f"Cpanel قبل {path_desc}")
+                    await post("/cpanel/api/save/pricing", pricing, ok)
+        # عناوين محافظ خاطئة من Cpanel
+        for code, bad_addr in (("usdt_trc20", "0x1234567890abcdef1234567890abcdef12345678"),
+                               ("usdt_bep20", "TXYZ1234567890abcdefghijkmnopqrstu"),
+                               ("usdt_trc20", "hello-this-is-not-an-address-at-all")):
+            ISSUES.context = f"cpanel payments {code}={bad_addr[:12]}…"
+            st, j = await post("/cpanel/api/save/payments", {code: {"address": bad_addr}}, ok)
+            if st == 200:
+                ISSUES.add("high", "cpanel-wallet-accepted", f"Cpanel قبل عنوان {bad_addr[:16]}… لشبكة {code}")
+            elif st >= 500:
+                ISSUES.add("medium", "cpanel-500", f"payments {code} → {st}")
+        st, j = await post("/cpanel/api/save/payments", {"usdt_bep20": {"address": "0x" + "ab" * 20}}, ok)
+        if st != 200:
+            ISSUES.add("high", "cpanel-wallet-rejected-valid", f"Cpanel رفض عنوان BEP20 صحيحاً: {st} {str(j)[:100]}")
         # باقة مجدولة بقيم خاطئة
         for bad in ({"code": "x", "title": "t", "price_usd": "5", "total_items": 1, "duration_days": 1},
                     {"code": "ok_pkg", "title": "باقة", "price_usd": "-5", "total_items": 3, "duration_days": 3},
@@ -167,16 +196,43 @@ async def scheduled_delivery(env):
     past_due = await qv("SELECT count(*) FROM scheduled_subscription_items WHERE subscription_id=$1 AND scheduled_at < now()", sid)
     if len(got) + len(again) and row2 and past_due and row2 > past_due:
         ISSUES.add("high", "sched-resend", f"أرسل {row2} عناصر بينما المستحق {past_due}")
+    # v0.9.2: بعد التأخر يُرسل تسليم واحد لكل مشترك في الساعة — لا دفعة
+    if past_due >= 2 and (row2 or 0) > 1:
+        ISSUES.add("medium", "sched-burst", f"أُرسلت {row2} تصاميم متأخرة دفعة واحدة (المستحق {past_due})")
+    late_note = [d for n, d in sent if str(d.get("chat_id")) == str(A) and "تسليمات متأخرة" in (d.get("text") or "")]
+    print(f"    admin late notice: {len(late_note)}")
+    if past_due >= 2 and not late_note:
+        ISSUES.add("low", "sched-late-silent", "لم يُبلَّغ الأدمن بالتسليمات المتأخرة")
+    # مرور ساعة: التسليم التالي يُرسل
+    await qv("UPDATE scheduled_subscription_items SET sent_at = now() - interval '61 minutes' WHERE subscription_id=$1 AND status='sent' RETURNING 1", sid)
+    await scheduler._scheduled_designs(env.bot)
+    row3 = await qv("SELECT sent_count FROM scheduled_subscriptions WHERE id=$1", sid)
+    print(f"    after 1h → sent_count={row3}")
+    if past_due >= 2 and row3 != (row2 or 0) + 1:
+        ISSUES.add("medium", "sched-catchup", f"بعد ساعة كان المتوقع {(row2 or 0) + 1} تسليمات، الفعلي {row3}")
     # مستخدم حظر البوت أثناء الاشتراك
     BLOCKED_CHATS.add(U)
-    await S.reschedule(sid, date.today().isoformat(), "00:00") if hasattr(S, "reschedule") else None
+    # التسليم n يقع في (البداية + n-1 يوماً) ← نبدأ قبل 3 أيام حتى يستحق التسليم 3 الآن
+    await S.reschedule(sid, (date.today() - timedelta(days=3)).isoformat(), "00:00") if hasattr(S, "reschedule") else None
+    await qv("UPDATE scheduled_subscription_items SET sent_at = now() - interval '61 minutes' WHERE subscription_id=$1 AND status='sent' RETURNING 1", sid)
+    before_attempts = await qv("SELECT coalesce(sum(attempts),0) FROM scheduled_subscription_items WHERE subscription_id=$1", sid)
     try:
         await scheduler._scheduled_designs(env.bot)
     except Exception as e:  # noqa: BLE001
         ISSUES.add("high", "scheduler-blocked-crash", f"{type(e).__name__}: {e}")
     BLOCKED_CHATS.discard(U)
     r = await q1_("SELECT status, sent_count, last_error FROM scheduled_subscriptions WHERE id=$1", sid)
-    print("    after blocked:", dict(r))
+    after_attempts = await qv("SELECT coalesce(sum(attempts),0) FROM scheduled_subscription_items WHERE subscription_id=$1", sid)
+    print("    after blocked:", dict(r), "attempts:", before_attempts, "→", after_attempts)
+    if after_attempts == before_attempts:
+        ISSUES.add("low", "sched-blocked-untested", "لم يُحاوَل أي تسليم لمستخدم حظر البوت — الاختبار لم يُنفَّذ")
+    elif after_attempts - before_attempts > 1:
+        ISSUES.add("medium", "sched-retry-burst", f"{after_attempts - before_attempts} محاولات متتالية في دورة واحدة لمستخدم حاظر")
+    if r["status"] != "paused":
+        ISSUES.add("medium", "sched-blocked-not-paused", f"الباقة لم تتوقف بعد حظر البوت: {r['status']}")
+    note = [d for n, d in sent if str(d.get("chat_id")) == str(A) and "العميل حظر البوت" in (d.get("text") or "")]
+    if not note:
+        ISSUES.add("low", "sched-blocked-silent", "لم يُبلَّغ الأدمن بإيقاف الباقة بسبب الحظر")
 
 
 async def q1_(sql, *a):

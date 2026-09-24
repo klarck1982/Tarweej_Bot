@@ -30,6 +30,8 @@ class AdminTopup(StatesGroup):
     message_user = State()
     wallet_address = State()
     wallet_holder = State()
+    wallet_confirm = State()
+    rate_confirm = State()
     syp_rate = State()
 
 
@@ -164,13 +166,16 @@ async def msg_adjust(message: Message, state: FSMContext) -> None:
     if message.text.startswith("/") or message.text in T.MAIN_BUTTONS:
         await state.clear()
         return
-    raw = message.text.strip().replace("$", "").replace(",", ".").translate(str.maketrans("٠١٢٣٤٥٦٧٨٩", "0123456789"))
+    from app.services import validators as V
+    parsed = V.parse_usd(message.text)
     try:
-        amount = money(Decimal(raw))
+        if parsed is None:
+            raise InvalidOperation
+        amount = money(parsed)
         if amount <= 0:
             raise InvalidOperation
     except (InvalidOperation, ValueError):
-        await message.answer("اكتب رقماً صحيحاً مثل <code>9.5</code>")
+        await message.answer("اكتب رقماً صحيحاً بمنزلتين عشريتين كحد أقصى، مثل <code>9.5</code>")
         return
     data = await state.get_data()
     tid = data["tid"]
@@ -420,14 +425,40 @@ async def msg_wallet_address(message: Message, state: FSMContext) -> None:
         return
     addr = PM.clean_address(m, message.text)
     if not addr:
-        hint = "رقم الحساب مو واضح — أرسله أرقاماً/أحرفاً بلا مسافات." if m.get("kind") == "shamcash" \
-            else "العنوان مو واضح — انسخه كاملاً من محفظتك بلا مسافات."
-        await message.answer(hint)
+        await message.answer(PM.address_hint(m))
+        return
+    # v0.9.2: العنوان/رقم الحساب يُعرض للمراجعة قبل الحفظ — حرف واحد خطأ = أموال العملاء تضيع
+    await state.set_state(AdminTopup.wallet_confirm)
+    await state.update_data(code=code, pending_address=addr)
+    what = "رقم الحساب" if m.get("kind") == "shamcash" else "العنوان"
+    await message.answer(
+        f"🔍 <b>راجع {what} قبل الحفظ</b>\n{notify.esc(m['title'])}\n\n<code>{notify.esc(addr)}</code>\n\n"
+        f"البداية: <b>{notify.esc(addr[:6])}</b> · النهاية: <b>{notify.esc(addr[-6:])}</b>\n"
+        f"قارنهما مع حسابك حرفاً بحرف. كل التحويلات القادمة ستصل إلى {what} هذا.",
+        reply_markup=K.admin_wallet_confirm(code))
+
+
+@router.callback_query(F.data.regexp(r"^adm:wal:(\w+):save$"))
+async def cb_wallet_save(cb: CallbackQuery, state: FSMContext) -> None:
+    code = cb.data.split(":")[2]
+    data = await state.get_data()
+    if await state.get_state() != AdminTopup.wallet_confirm.state or data.get("code") != code or not data.get("pending_address"):
+        await cb.answer("انتهت الجلسة — أدخل العنوان من جديد", show_alert=True)
+        return
+    await cb.answer("✅ حُفظ")
+    await _save_wallet_address(cb.message, state, code, data["pending_address"], admin_id=cb.from_user.id)
+
+
+async def _save_wallet_address(message: Message, state: FSMContext, code: str, addr: str, admin_id: int | None = None) -> None:
+    methods = await PM.get_methods()
+    m = methods.get(code)
+    if not m:
+        await state.clear()
         return
     await state.clear()
     methods[code]["address"] = addr
     await PM.save_methods(methods)
-    await events.log_event("wallet_updated", message.from_user.id, method=code)
+    await events.log_event("wallet_updated", admin_id or message.from_user.id, method=code)
     await message.answer(T.ADMIN_WALLET_SAVED.format(title=notify.esc(m["title"]), address=notify.esc(addr)))
     if m.get("kind") == "shamcash" and not m.get("holder"):
         # نكمل مباشرة باسم صاحب الحساب — خطوة واحدة أقل على الأدمن
@@ -482,9 +513,33 @@ async def msg_rate(message: Message, state: FSMContext) -> None:
     if rate is None:
         await message.answer(T.ADMIN_RATE_INVALID)
         return
+    current = await PM.syp_rate()
+    if current > 0 and abs(rate - current) / current > Decimal("0.3"):
+        # v0.9.2: تغيّر أكثر من 30% ← غالباً صفر ناقص/زائد؛ كل دفعات الليرة تُحسب منه
+        await state.set_state(AdminTopup.rate_confirm)
+        await state.update_data(pending_rate=str(rate))
+        await message.answer(
+            f"⚠️ <b>تغيّر كبير في سعر الصرف</b>\nالحالي: 1$ = <b>{PM.fmt_rate(current)}</b> ل.س\n"
+            f"الجديد: 1$ = <b>{PM.fmt_rate(rate)}</b> ل.س\n\nتأكد من عدد الأصفار — كل مبالغ شام كاش ليرة تُحسب من هذا السعر.",
+            reply_markup=K.admin_rate_confirm())
+        return
+    await _save_rate(message, state, rate, message.from_user.id)
+
+
+async def _save_rate(message: Message, state: FSMContext, rate: Decimal, admin_id: int) -> None:
     await state.clear()
     await PM.set_syp_rate(rate)
-    await events.log_event("syp_rate_updated", message.from_user.id, rate=str(rate))
+    await events.log_event("syp_rate_updated", admin_id, rate=str(rate))
     await message.answer(T.ADMIN_RATE_SAVED.format(rate=PM.fmt_rate(rate)))
     text, kb = await _wallets_view()
     await message.answer(text, reply_markup=kb)
+
+
+@router.callback_query(F.data == "adm:rate:save")
+async def cb_rate_save(cb: CallbackQuery, state: FSMContext) -> None:
+    data = await state.get_data()
+    if await state.get_state() != AdminTopup.rate_confirm.state or not data.get("pending_rate"):
+        await cb.answer("انتهت الجلسة — أدخل السعر من جديد", show_alert=True)
+        return
+    await cb.answer("✅ حُفظ")
+    await _save_rate(cb.message, state, Decimal(data["pending_rate"]), cb.from_user.id)

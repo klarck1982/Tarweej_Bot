@@ -243,11 +243,12 @@ async def msg_adjust(message: Message, state: FSMContext) -> None:
     if len(parts) < 2:
         await message.answer(T.USER_ADJUST_INVALID)
         return
-    try:
-        amount = money_value(parts[0].replace(",", ".").replace("$", ""))
-    except (InvalidOperation, ValueError):
+    from app.services import validators as V
+    parsed = V.parse_usd(parts[0])   # v0.9.2: صارم — لا 1e3 ولا 5.555
+    if parsed is None:
         await message.answer(T.USER_ADJUST_INVALID)
         return
+    amount = money_value(parsed)
     reason = parts[1].strip()[:300]
     if amount <= 0:
         await message.answer(T.USER_ADJUST_INVALID)

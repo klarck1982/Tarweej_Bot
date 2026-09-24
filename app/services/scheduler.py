@@ -17,6 +17,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from aiogram import Bot
+from aiogram.exceptions import TelegramForbiddenError
 
 from app.config import settings
 from app.db.repo import orders as repo
@@ -129,6 +130,9 @@ async def tick(bot: Bot) -> None:
     await _nour_health(bot)
 
 
+_late_notified: set[int] = set()
+
+
 async def _scheduled_designs(bot: Bot) -> None:
     """📅 إرسال التصميم + النص المجدول لكل مشترك، مع حجز يمنع التكرار وإعادة محاولة الفشل."""
     from app.bot import texts as T
@@ -143,6 +147,16 @@ async def _scheduled_designs(bot: Bot) -> None:
             return
         if not item:
             return
+        overdue = int(item.get("overdue_count") or 0)
+        if overdue >= 2 and item["subscription_id"] not in _late_notified:
+            # تنبيه واحد للأدمن لكل اشتراك متأخر (لكل تشغيل للخادم)
+            _late_notified.add(item["subscription_id"])
+            try:
+                await ON.notify_admins_text(
+                    bot, f"⏰ <b>تسليمات متأخرة</b>\nSUB-{item['subscription_id']} · {overdue} تصاميم فات موعدها\n"
+                         f"ستُرسل تباعاً: تصميم واحد كل {SR.CATCHUP_GAP_MINUTES} دقيقة بدل دفعة واحدة.")
+            except Exception:  # noqa: BLE001
+                pass
         try:
             kind = item["file_kind"]
             if kind == "photo":
@@ -170,9 +184,19 @@ async def _scheduled_designs(bot: Bot) -> None:
                     await ON.notify_admins_text(bot, f"✅ <b>اكتملت باقة التصميم</b>\nSUB-{sub['id']} · {done}/{total}")
         except Exception as e:  # noqa: BLE001
             attempts = int(item.get("attempts") or 1)
-            retry = attempts < 3
+            blocked = isinstance(e, TelegramForbiddenError)   # العميل حظر البوت — خطأ دائم، لا فائدة من الإعادة
+            retry = attempts < 3 and not blocked
             sub = await SR.mark_failed(item["id"], item["subscription_id"], str(e), retry=retry)
-            if retry:
+            if blocked:
+                try:
+                    from app.db.repo import users as users_repo
+                    await users_repo.mark_bot_blocked(item["user_id"], True)
+                except Exception:  # noqa: BLE001
+                    pass
+                await ON.notify_admins_text(
+                    bot, f"⏸️ <b>أُوقفت باقة مجدولة مؤقتاً</b>\nSUB-{item['subscription_id']} · التسليم {item['seq']}\n"
+                         "السبب: العميل حظر البوت. استأنفها من Cpanel بعد تواصله معكم.")
+            elif retry:
                 log.warning("scheduled delivery SUB-%s day %s failed (%s/%s): %s", item["subscription_id"], item["seq"], attempts, 3, e)
             else:
                 await ON.notify_admins_text(bot, f"⚠️ <b>توقفت جدولة تصميم</b>\nSUB-{item['subscription_id']} · اليوم {item['seq']}\nالسبب: {T.esc(str(e)[:250])}")

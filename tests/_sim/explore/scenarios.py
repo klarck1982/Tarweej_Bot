@@ -454,8 +454,13 @@ async def s_sched(env, show):
     # تفعيل بتاريخ اليوم وتشغيل المجدول
     from app.services import scheduled as S
     from datetime import date, timedelta
+    # التفعيل قبل اكتمال التصاميم يجب أن يُرفض (مقصود) — المشكلة فقط لو قُبل
     try:
         await S.activate(sid, (date.today() - timedelta(days=1)).isoformat(), "00:01")
+        if items < 7:
+            ISSUES.add("high", "sched-activate-incomplete", f"تفعيل اشتراك ينقصه {7 - items} تصاميم قُبل")
+    except ValueError as e:
+        print("    activate refused as expected:", e)
     except Exception as e:  # noqa: BLE001
         ISSUES.add("medium", "sched-activate", f"تفعيل الاشتراك: {type(e).__name__}: {e}")
     from app.services import scheduler
@@ -574,6 +579,25 @@ async def s_admin_tools(env, show):
         ISSUES.add("medium", "wallet-format", "عنوان TRC20 يقبل أي نص طوله 20+ بلا مسافات (مثل عنوان 0x… من شبكة أخرى) — خطر ضياع أموال العملاء")
     else:
         await a.text("/cancel")
+    # عنوان TRC20 صحيح ← شاشة مراجعة أولاً، ولا يُحفظ قبل «✅ العنوان صحيح»
+    from app.services import payments as _PM
+    good = "TXYZabcdefghijkmnopqrstuvwxyz1234"   # 34 حرفاً Base58 يبدأ بـ T
+    good = "T" + "R7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6"[:33].ljust(33, "a")
+    await drive(a, ["cb:adm:wal:usdt_trc20", "cb:adm:wal:usdt_trc20:edit", f"t:{good}"], show)
+    saved_early = (await _PM.get_methods())["usdt_trc20"].get("address") == good
+    expect(await a.state() == "AdminTopup:wallet_confirm" and not saved_early, "high", "wallet-no-confirm",
+           f"عنوان المحفظة حُفظ بلا مراجعة (state={await a.state()})")
+    await drive(a, ["cb:adm:wal:usdt_trc20:save"], show)
+    expect((await _PM.get_methods())["usdt_trc20"].get("address") == good, "high", "wallet-save",
+           "العنوان لم يُحفظ بعد التأكيد")
+    # سعر الصرف: تغيّر كبير يحتاج تأكيداً
+    await drive(a, ["cb:adm:rate", "t:13000"], show)
+    if await a.state() == "AdminTopup:rate_confirm":
+        await drive(a, ["cb:adm:rate:save"], show)
+    await drive(a, ["cb:adm:rate", "t:130"], show)   # صفران ناقصان
+    expect(await a.state() == "AdminTopup:rate_confirm" and await _PM.syp_rate() == D("13000"), "high", "rate-no-confirm",
+           f"سعر 130 بدل 13000 حُفظ بلا تأكيد (rate={await _PM.syp_rate()})")
+    await a.text("/cancel")
     await drive(a, ["cb:adm:rate", "t:0"], show)
     if not await a.state():
         ISSUES.add("medium", "syp-rate-zero", "سعر الصرف 0 قُبل")
