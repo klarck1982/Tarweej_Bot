@@ -141,33 +141,54 @@ def build_nour_payload(order: dict, fallback_username: str = "") -> dict:
 
 # ───────────── التأكيد (الخصم) ─────────────
 
-async def confirm(user_id: int, spec: dict, draft_id: int | None = None) -> dict:
+class _Duplicate(Exception):
+    """داخلي: عملية بنفس رمز الشراء نُفذت سابقاً — يُرفع داخل المعاملة ليُحرَّر الاتصال والقفل أولاً."""
+    def __init__(self, ref_id: int):
+        super().__init__(ref_id)
+        self.ref_id = int(ref_id)
+
+
+async def confirm(user_id: int, spec: dict, draft_id: int | None = None, checkout_key: str | None = None) -> dict:
     """يخصم السعر وينشئ الطلب paid في معاملة واحدة. يرفع InsufficientBalance بلا أي أثر إن لم يكفِ الرصيد.
 
-    الطلبات اليدوية (tg_ads) تُنشأ مباشرة بحالة submitted — لا يوجد شريك يُرسل إليه، الأدمن ينفّذها بيده."""
+    الطلبات اليدوية (tg_ads) تُنشأ مباشرة بحالة submitted — لا يوجد شريك يُرسل إليه، الأدمن ينفّذها بيده.
+
+    منع التكرار (v0.9.2): checkout_key = رمز الشراء المولَّد عند عرض الملخص. أي استدعاء ثانٍ بنفس الرمز
+    (ضغطة مزدوجة، تحديثات متزامنة، زر قديم) يعيد الطلب الأول نفسه مع order["duplicate"] = True — بلا خصم.
+    القفل على صف المستخدم يُؤخذ أولاً فتتسلسل الضغطات المتزامنة بلا deadlock."""
     budget, price, cost = compute_prices(spec)
     spec = {**spec, "budget": str(budget), "price": str(price), "cost": str(cost)}
     kind = spec.get("kind") or "meta_campaign"
     manual = kind != "meta_campaign"
     init_status = "submitted" if manual else "paid"
     import json
-    async with db.pool().acquire() as c:
+    try:
+      async with db.pool().acquire() as c:
         async with c.transaction():
+            # 1) القفل أولاً — قبل أي INSERT يلمس المفتاح الأجنبي إلى users
+            await money_svc.lock_user(c, user_id)
+            # 2) هل نُفِّذ هذا الشراء مسبقاً؟
+            if checkout_key:
+                existing = await c.fetchval(
+                    "SELECT id FROM orders WHERE checkout_key = $1 AND user_id = $2", checkout_key, user_id)
+                if existing:
+                    # لا نقرأ من اتصال ثانٍ ونحن نمسك القفل: المجمّع صغير (3) فيتجمد تحت الضغطات المتزامنة
+                    raise _Duplicate(existing)
             if draft_id:
                 row = await c.fetchrow(
                     "UPDATE orders SET status = $6, kind = $7, spec = $2::jsonb, price_usd = $3, cost_usd = $4, paid_at = now(), "
                     "submitted_at = CASE WHEN $6 = 'submitted' THEN now() ELSE NULL END, "
-                    "expires_at = NULL, updated_at = now(), idempotency_key = 'ord-' || id "
+                    "expires_at = NULL, updated_at = now(), idempotency_key = 'ord-' || id, checkout_key = $8 "
                     "WHERE id = $1 AND user_id = $5 AND status = 'awaiting_payment' RETURNING *",
-                    draft_id, json.dumps(spec, ensure_ascii=False), price, cost, user_id, init_status, kind,
+                    draft_id, json.dumps(spec, ensure_ascii=False), price, cost, user_id, init_status, kind, checkout_key,
                 )
             else:
                 row = None
             if row is None:
                 row = await c.fetchrow(
-                    "INSERT INTO orders (user_id, kind, status, spec, price_usd, cost_usd, paid_at, submitted_at) "
-                    "VALUES ($1, $5, $6, $2::jsonb, $3, $4, now(), CASE WHEN $6 = 'submitted' THEN now() END) RETURNING *",
-                    user_id, json.dumps(spec, ensure_ascii=False), price, cost, kind, init_status,
+                    "INSERT INTO orders (user_id, kind, status, spec, price_usd, cost_usd, paid_at, submitted_at, checkout_key) "
+                    "VALUES ($1, $5, $6, $2::jsonb, $3, $4, now(), CASE WHEN $6 = 'submitted' THEN now() END, $7) RETURNING *",
+                    user_id, json.dumps(spec, ensure_ascii=False), price, cost, kind, init_status, checkout_key,
                 )
                 await c.execute("UPDATE orders SET idempotency_key = 'ord-' || id WHERE id = $1", row["id"])
             if kind == "design":
@@ -179,6 +200,11 @@ async def confirm(user_id: int, spec: dict, draft_id: int | None = None) -> dict
             what = KIND_NAME.get(kind, kind) if manual else f"إعلان {TG.PLATFORM_NAME.get(spec.get('platform'), '')}"
             await money_svc.debit(user_id, price, "order_charge", ref_type="order", ref_id=row["id"],
                                   note=f"ORD-{row['id']} {what}", conn=c)
+    except _Duplicate as d:
+        dup = await repo.get(d.ref_id)
+        dup = dict(dup) if dup else {"id": d.ref_id}
+        dup["duplicate"] = True
+        return dup
     order = await repo.get(row["id"])
     await events.log_event("order_paid", user_id, order["id"], price=str(price), cost=str(cost), kind=kind)
     return order

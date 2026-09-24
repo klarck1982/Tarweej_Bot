@@ -142,16 +142,31 @@ def _package_spec(package: dict) -> dict:
     }
 
 
-async def purchase(user_id: int, code: str) -> dict:
-    """شراء الباقة من الرصيد؛ تُنشأ بانتظار إدخال المحتوى من Cpanel."""
+class _Duplicate(Exception):
+    def __init__(self, ref_id: int):
+        super().__init__(ref_id)
+        self.ref_id = int(ref_id)
+
+
+async def purchase(user_id: int, code: str, checkout_key: str | None = None) -> dict:
+    """شراء الباقة من الرصيد؛ تُنشأ بانتظار إدخال المحتوى من Cpanel.
+
+    checkout_key (v0.9.2): رمز زر التأكيد — شراء واحد فقط لكل رمز. الضغطة المكررة أو الزر القديم
+    يعيدان الاشتراك الأول نفسه مع result["duplicate"] = True بلا أي خصم."""
     package = await get_package(code, enabled_only=True)
     if not package:
         raise ValueError("الباقة غير متاحة حالياً")
     price = money_amount(Decimal(str(package["price_usd"])))
     spec = _package_spec(package)
-    async with db.pool().acquire() as c:
+    try:
+      async with db.pool().acquire() as c:
         async with c.transaction():
-            balance = Decimal(await c.fetchval("SELECT balance_usd FROM users WHERE tg_id=$1 FOR UPDATE", user_id) or 0)
+            balance = await money.lock_user(c, user_id)   # القفل أولاً: يسلسل الضغطات المتزامنة
+            if checkout_key:
+                existing = await c.fetchval(
+                    "SELECT id FROM scheduled_subscriptions WHERE checkout_key=$1 AND user_id=$2", checkout_key, user_id)
+                if existing:
+                    raise _Duplicate(existing)   # نقرأه بعد تحرير الاتصال والقفل (المجمّع صغير = 3)
             if balance < price:
                 raise money.InsufficientBalance(balance, price)
             order = await c.fetchrow(
@@ -166,13 +181,14 @@ async def purchase(user_id: int, code: str) -> dict:
             sub = await c.fetchrow(
                 """
                 INSERT INTO scheduled_subscriptions
-                    (user_id, order_id, package_code, package_title, price_usd, total_items, duration_days, send_time, timezone)
-                VALUES ($1,$2,$3,$4,$5,$6,$7,$8::time,$9)
+                    (user_id, order_id, package_code, package_title, price_usd, total_items, duration_days, send_time, timezone,
+                     checkout_key)
+                VALUES ($1,$2,$3,$4,$5,$6,$7,$8::time,$9,$10)
                 RETURNING id
                 """,
                 user_id, order["id"], package["code"], package["title"], price,
                 int(package["total_items"]), int(package["duration_days"]), _time_value(package.get("send_time")),
-                package.get("timezone") or DEFAULT_TIMEZONE,
+                package.get("timezone") or DEFAULT_TIMEZONE, checkout_key,
             )
             await c.execute("UPDATE orders SET scheduled_subscription_id=$2 WHERE id=$1", order["id"], sub["id"])
             await c.execute(
@@ -180,6 +196,11 @@ async def purchase(user_id: int, code: str) -> dict:
                 user_id, -price, sub["id"], f"SUB-{sub['id']} {package['title']}",
             )
             await c.execute("UPDATE users SET balance_usd=balance_usd-$2 WHERE tg_id=$1", user_id, price)
+    except _Duplicate as d:
+        dup = await repo.get_subscription(d.ref_id)
+        dup = dict(dup) if dup else {"id": d.ref_id, "package_title": package["title"]}
+        dup["duplicate"] = True
+        return dup
     result = await repo.get_subscription(int(sub["id"]))
     if not result:
         raise RuntimeError("تعذر إنشاء الاشتراك")

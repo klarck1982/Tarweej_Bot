@@ -84,9 +84,14 @@ async def cb_buy(cb: CallbackQuery) -> None:
 
 @router.callback_query(F.data.startswith("sub:confirm:"))
 async def cb_confirm(cb: CallbackQuery) -> None:
-    code = cb.data.split(":", 2)[2]
+    rest = cb.data.split(":", 2)[2]
+    code, _, tok = rest.partition(":")
+    if not tok:
+        # زر من إصدار سابق بلا رمز شراء — لا نخصم من زر قديم؛ نعرض المراجعة من جديد بزر صالح لمرة واحدة
+        await cb_buy(cb)
+        return
     try:
-        subscription = await SD.purchase(cb.from_user.id, code)
+        subscription = await SD.purchase(cb.from_user.id, code, checkout_key=f"sub-{cb.from_user.id}-{tok}")
     except InsufficientBalance as e:
         await cb.message.edit_text(
             f"❌ رصيدك غير كافٍ.\n\nرصيدك: <b>{fmt(e.balance)}</b>\nالمطلوب: <b>{fmt(e.needed)}</b>",
@@ -102,6 +107,10 @@ async def cb_confirm(cb: CallbackQuery) -> None:
         # والباقة حتى يظهر السبب الحقيقي في Render بدلاً من رسالة عامة فقط.
         log.exception("scheduled purchase failed user=%s code=%s", cb.from_user.id, code)
         await cb.answer("تعذر إنشاء الاشتراك الآن. حاول مرة أخرى.", show_alert=True)
+        return
+    if subscription.get("duplicate"):
+        # ضغطة مكررة أو زر قديم: الاشتراك أُنشئ وخُصم مرة واحدة فقط
+        await cb.answer(f"✅ اشتراكك SUB-{subscription['id']} مسجّل مسبقاً — لم يُخصم أي مبلغ إضافي")
         return
     await notify.notify_admins_new_subscriber(cb.bot, subscription)
     await cb.message.edit_text(

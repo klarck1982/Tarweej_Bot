@@ -60,7 +60,10 @@ async def main():
 
     await dp.feed_update(bot, cb(A, "adm:find")); await dp.feed_update(bot, msg(A, "@samer")); dump("بحث المستخدم")
     await dp.feed_update(bot, cb(A, f"adm:user:{U}:add")); await dp.feed_update(bot, msg(A, "5 تعويض اختبار")); dump("ملخص إضافة الرصيد")
-    await dp.feed_update(bot, cb(A, f"adm:bal:confirm:{U}")); dump("تأكيد الإضافة وإشعار العميل")
+    from aiogram.fsm.storage.base import StorageKey
+    nonce = (await dp.storage.get_data(StorageKey(bot_id=bot.id, chat_id=A, user_id=A))).get("nonce")
+    confirm_cd = f"adm:bal:confirm:{U}:{nonce}"   # v0.9.2: زر التأكيد يحمل رمزاً لمرة واحدة
+    await dp.feed_update(bot, cb(A, confirm_cd)); dump("تأكيد الإضافة وإشعار العميل")
     assert await users.get_balance(U) == Decimal("5.00")
     assert await db.fetchval("SELECT count(*) FROM ledger WHERE user_id=$1 AND type='adjustment'", U) == 1
 

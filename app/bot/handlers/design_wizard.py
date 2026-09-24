@@ -15,6 +15,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import CallbackQuery, Message
 
+from app.bot import checkout as CO
 from app.bot import keyboards as K
 from app.bot import texts as T
 from app.db.repo import events, orders as orders_repo, settings as settings_repo, users as users_repo
@@ -542,6 +543,7 @@ def summary_text(spec: dict, price: Decimal, balance: Decimal) -> tuple[str, boo
 async def _show_summary(target, state: FSMContext, new_message: bool = False) -> None:
     d = await state.get_data()
     await state.set_state(Design.choosing)
+    await CO.ensure_token(state)   # رمز الشراء — يمنع الخصم المكرر (v0.9.2)
     await state.update_data(editing=False)
     if not d.get("message"):
         await _show_msg(target, state, new_message)
@@ -631,10 +633,14 @@ async def cb_confirm(cb: CallbackQuery, state: FSMContext) -> None:
     except Exception:  # noqa: BLE001
         pass
     try:
-        order = await orders_svc.confirm(cb.from_user.id, spec, d.get("draft_id"))
+        order = await orders_svc.confirm(cb.from_user.id, spec, d.get("draft_id"), CO.key_for(cb, d))
     except InsufficientBalance:
         await cb.answer(T.META_INSUFFICIENT_RACE, show_alert=True)
         await _show_summary(cb, state)
+        return
+    if order.get("duplicate"):
+        # ضغطة مكررة/متزامنة: الطلب الأول أُنشئ وخُصم مرة واحدة — لا نكرر الإشعارات ولا الملفات
+        await CO.answer_duplicate(cb, order)
         return
     media = list(d.get("media") or [])
     b = d.get("brand") or {}

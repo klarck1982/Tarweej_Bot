@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
 from decimal import Decimal, InvalidOperation
 
 from aiogram import F, Router
-from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
+from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError, TelegramRetryAfter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import CallbackQuery, Message
@@ -19,6 +20,8 @@ from app.config import settings
 from app.db.repo import events, orders as orders_repo, tickets as ticket_repo, users as users_repo
 from app.services import money, ticket_notify as TN
 from app.services.pricing import fmt, money as money_value
+
+log = logging.getLogger(__name__)
 
 router = Router(name="admin_tools")
 router.message.filter(F.from_user.id.in_(set(settings.admin_ids)))
@@ -258,19 +261,24 @@ async def msg_adjust(message: Message, state: FSMContext) -> None:
     if after < 0:
         await message.answer(T.USER_BALANCE_BLOCKED.format(amount=fmt(amount), balance=fmt(before)))
         return
-    await state.update_data(amount=str(amount), reason=reason, after=str(after))
+    import secrets
+    nonce = secrets.token_hex(6)
+    await state.update_data(amount=str(amount), reason=reason, after=str(after), nonce=nonce)
     verb = "إضافة" if direction == "add" else "خصم"
     direction_text = "الإضافة" if direction == "add" else "الخصم"
     text = T.USER_ADJUST_SUMMARY.format(name=T.esc(data.get("name")), uid=data["uid"], before=fmt(before),
                                         direction=direction_text, amount=fmt(amount), after=fmt(after), reason=T.esc(reason))
-    await message.answer(text, reply_markup=K.admin_balance_confirm(int(data["uid"]), verb, fmt(amount)))
+    await message.answer(text, reply_markup=K.admin_balance_confirm(int(data["uid"]), verb, fmt(amount), nonce))
 
 
-@router.callback_query(F.data.regexp(r"^adm:bal:confirm:(\d+)$"))
+@router.callback_query(F.data.regexp(r"^adm:bal:confirm:(\d+)(?::(\w+))?$"))
 async def cb_adjust_confirm(cb: CallbackQuery, state: FSMContext) -> None:
-    uid = int(cb.data.split(":")[-1])
+    parts = cb.data.split(":")
+    uid = int(parts[3])
+    nonce = parts[4] if len(parts) > 4 else ""
     data = await state.get_data()
-    if int(data.get("uid") or 0) != uid or not data.get("amount"):
+    # الرمز يجب أن يطابق شاشة الملخص الحالية — زر قديم أو ضغطة بعد التنفيذ = جلسة منتهية
+    if int(data.get("uid") or 0) != uid or not data.get("amount") or not nonce or nonce != data.get("nonce"):
         await cb.answer("انتهت جلسة التعديل — ابدأ من بطاقة المستخدم", show_alert=True)
         await state.clear()
         return
@@ -279,11 +287,17 @@ async def cb_adjust_confirm(cb: CallbackQuery, state: FSMContext) -> None:
     direction = data.get("direction")
     try:
         if direction == "add":
-            balance = await money.credit(uid, amount, "adjustment", ref_type="admin", note=reason, admin_id=cb.from_user.id)
+            balance = await money.credit(uid, amount, "adjustment", ref_type="admin", note=reason, admin_id=cb.from_user.id,
+                                         idem_key=f"adj-{nonce}")
             sign, word = "+", "إضافة"
         else:
-            balance = await money.debit(uid, amount, "adjustment", ref_type="admin", note=reason, admin_id=cb.from_user.id)
+            balance = await money.debit(uid, amount, "adjustment", ref_type="admin", note=reason, admin_id=cb.from_user.id,
+                                        idem_key=f"adj-{nonce}")
             sign, word = "−", "خصم"
+    except money.DuplicateOperation:
+        # ضغطة مكررة/متزامنة: التعديل نُفّذ مرة واحدة فقط بالضغطة الأولى
+        await cb.answer("✅ هذا التعديل نُفّذ مسبقاً — لم يتكرر", show_alert=False)
+        return
     except money.InsufficientBalance as e:
         await state.clear()
         await cb.answer(T.USER_BALANCE_BLOCKED.format(amount=fmt(amount), balance=fmt(e.balance)), show_alert=True)
@@ -390,52 +404,112 @@ async def cb_broadcast_audience(cb: CallbackQuery, state: FSMContext) -> None:
     await cb.answer()
 
 
-async def _run_broadcast(cb: CallbackQuery, state: FSMContext) -> None:
-    data = await state.get_data()
-    segment = data.get("segment")
-    if not segment or not data.get("text"):
-        await cb.answer("انتهت جلسة البث", show_alert=True)
-        await state.clear()
-        return
-    text = str(data["text"])
-    photo_id = data.get("photo_id")
-    recipients = await users_repo.broadcast_recipients(segment)
-    if not recipients:
-        await state.clear()
-        await cb.answer(T.BROADCAST_EMPTY, show_alert=True)
-        return
-    await state.clear()
-    sent = blocked = failed = 0
-    started = time.perf_counter()
-    for target in recipients:
-        body = text.replace("{name}", str(target.get("name") or "صديقنا"))
+# ───────── تنفيذ البث (v0.9.2) ─────────
+# • يعمل في الخلفية: الضغطة تُجاب فوراً ولا يتعطل معالج البوت دقائق مع آلاف المستخدمين
+# • بث واحد فقط في كل مرة: ضغطتا تأكيد متزامنتان لا تُرسلان الرسالة مرتين
+# • النص يُهرَّب كما في المعاينة تماماً (<b> يظهر نصاً لا تنسيقاً — لا أخطاء HTML)
+# • احترام حد تيليغرام: عند 429 ننتظر retry_after ونعيد المحاولة
+BROADCAST_TASKS: set[asyncio.Task] = set()
+_broadcast_busy = False
+_BC_LABELS = {"all": "الجميع", "balance": "لديهم رصيد", "ordered": "طلبوا سابقاً", "new": "لم يطلبوا بعد"}
+
+
+def render_broadcast(text: str, name: str | None) -> str:
+    """نفس صيغة المعاينة: النص مهرَّب و{name} مهرَّب."""
+    return T.esc(text).replace("{name}", T.esc(name or "صديقنا"))
+
+
+async def _send_with_retry(bot, chat_id: int, body: str, photo_id: str | None, plain_len: int) -> None:
+    for attempt in range(4):
         try:
             if photo_id:
-                await cb.bot.send_photo(target["tg_id"], photo_id, caption=body if len(body) <= 1024 else None)
-                if len(body) > 1024:
-                    await cb.bot.send_message(target["tg_id"], body)
+                if plain_len <= 1024:
+                    await bot.send_photo(chat_id, photo_id, caption=body)
+                else:
+                    await bot.send_photo(chat_id, photo_id)
+                    await bot.send_message(chat_id, body)
             else:
-                await cb.bot.send_message(target["tg_id"], body)
-            sent += 1
-        except TelegramForbiddenError:
-            blocked += 1
-            await users_repo.mark_bot_blocked(target["tg_id"], True)
-        except TelegramBadRequest as e:
-            msg = str(e).lower()
-            if "blocked" in msg or "chat not found" in msg or "deactivated" in msg:
+                await bot.send_message(chat_id, body)
+            return
+        except TelegramRetryAfter as e:
+            if attempt == 3:
+                raise
+            await asyncio.sleep(float(e.retry_after) + 0.5)
+
+
+async def _broadcast_worker(bot, admin_id: int, segment: str, text: str, photo_id: str | None, recipients: list) -> None:
+    global _broadcast_busy
+    sent = blocked = failed = 0
+    started = time.perf_counter()
+    try:
+        for target in recipients:
+            name = str(target.get("name") or "صديقنا")
+            body = render_broadcast(text, name)
+            plain_len = len(text.replace("{name}", name))
+            try:
+                await _send_with_retry(bot, target["tg_id"], body, photo_id, plain_len)
+                sent += 1
+            except TelegramForbiddenError:
                 blocked += 1
                 await users_repo.mark_bot_blocked(target["tg_id"], True)
-            else:
+            except TelegramBadRequest as e:
+                msg = str(e).lower()
+                if "blocked" in msg or "chat not found" in msg or "deactivated" in msg:
+                    blocked += 1
+                    await users_repo.mark_bot_blocked(target["tg_id"], True)
+                else:
+                    failed += 1
+            except Exception:  # noqa: BLE001
                 failed += 1
-        except Exception:
-            failed += 1
-        await asyncio.sleep(0.05)
-    seconds = round(time.perf_counter() - started, 1)
-    labels = {"all": "الجميع", "balance": "لديهم رصيد", "ordered": "طلبوا سابقاً", "new": "لم يطلبوا بعد"}
-    report = T.BROADCAST_PROGRESS.format(segment=labels.get(segment, segment), sent=sent, blocked=blocked, failed=failed, seconds=seconds)
-    await events.log_event("broadcast_finished", cb.from_user.id, segment=segment, sent=sent, blocked=blocked, failed=failed)
-    await cb.bot.send_message(cb.from_user.id, report, reply_markup=K.admin_back())
-    await cb.answer("اكتمل البث ✅")
+            await asyncio.sleep(0.05)   # ≈ 20 رسالة/ثانية — تحت حد تيليغرام (30)
+        seconds = round(time.perf_counter() - started, 1)
+        report = T.BROADCAST_PROGRESS.format(segment=_BC_LABELS.get(segment, segment), sent=sent, blocked=blocked,
+                                             failed=failed, seconds=seconds)
+        await events.log_event("broadcast_finished", admin_id, segment=segment, sent=sent, blocked=blocked, failed=failed)
+        await bot.send_message(admin_id, report, reply_markup=K.admin_back())
+    except Exception:  # noqa: BLE001
+        log.exception("broadcast worker crashed")
+        try:
+            await bot.send_message(admin_id, f"⚠️ توقف البث بعد إرسال {sent} رسالة بسبب خطأ غير متوقع.",
+                                   reply_markup=K.admin_back())
+        except Exception:  # noqa: BLE001
+            pass
+    finally:
+        _broadcast_busy = False
+
+
+async def _run_broadcast(cb: CallbackQuery, state: FSMContext) -> None:
+    global _broadcast_busy
+    if _broadcast_busy:
+        await cb.answer("⏳ يوجد بث قيد الإرسال الآن — انتظر حتى يكتمل", show_alert=True)
+        return
+    _broadcast_busy = True   # يُحجز قبل أي await ← الضغطة المتزامنة الثانية ترى البث مشغولاً
+    try:
+        data = await state.get_data()
+        segment = data.get("segment")
+        if not segment or not data.get("text"):
+            await state.clear()
+            await cb.answer("انتهت جلسة البث", show_alert=True)
+            _broadcast_busy = False
+            return
+        await state.clear()
+        recipients = await users_repo.broadcast_recipients(segment)
+        if not recipients:
+            await cb.answer(T.BROADCAST_EMPTY, show_alert=True)
+            _broadcast_busy = False
+            return
+        task = asyncio.create_task(_broadcast_worker(cb.bot, cb.from_user.id, segment, str(data["text"]),
+                                                     data.get("photo_id"), list(recipients)))
+    except Exception:
+        _broadcast_busy = False
+        raise
+    BROADCAST_TASKS.add(task)
+    task.add_done_callback(BROADCAST_TASKS.discard)
+    await cb.answer(f"🚀 بدأ البث إلى {len(recipients)} — سيصلك التقرير عند الانتهاء")
+    try:
+        await cb.message.edit_text(f"🚀 <b>جارٍ البث</b> إلى {len(recipients)} مستخدم…\nسيصلك تقرير عند الانتهاء.")
+    except Exception:  # noqa: BLE001
+        pass
 
 
 @router.callback_query(F.data == "adm:bc:confirm")

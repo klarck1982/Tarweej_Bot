@@ -184,8 +184,12 @@ def scheduled_package_detail(package: dict) -> InlineKeyboardMarkup:
 
 
 def scheduled_purchase_confirm(code: str) -> InlineKeyboardMarkup:
+    # رمز شراء لمرة واحدة في الزر نفسه (v0.9.2): الضغطة المكررة/الزر القديم لا يشتريان باقة ثانية.
+    # الطول: 12 + رمز الباقة (≤40) + 1 + 8 = 61 بايت ≤ 64
+    import secrets
+    tok = secrets.token_hex(4)
     return InlineKeyboardMarkup(inline_keyboard=[
-        [ib("✅ تأكيد الدفع والاشتراك", f"sub:confirm:{code}", "success")],
+        [ib("✅ تأكيد الدفع والاشتراك", f"sub:confirm:{code}:{tok}", "success")],
         [ib("💰 شحن الرصيد", "bal:topup")],
         [ib("◀️ رجوع", f"sub:pkg:{code}")],
     ])
@@ -1275,9 +1279,19 @@ def admin_user_card(user: dict) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def admin_balance_confirm(uid: int, verb: str, amount: str) -> InlineKeyboardMarkup:
+def admin_balance_confirm(uid: int, verb: str, amount: str, nonce: str = "") -> InlineKeyboardMarkup:
+    # nonce (v0.9.2): رمز لمرة واحدة — الضغطة المكررة لا تضيف/تخصم مرتين
+    data = f"adm:bal:confirm:{uid}:{nonce}" if nonce else f"adm:bal:confirm:{uid}"
     return InlineKeyboardMarkup(inline_keyboard=[
-        [ib(f"✅ تأكيد {verb} {amount}", f"adm:bal:confirm:{uid}", "success")],
+        [ib(f"✅ تأكيد {verb} {amount}", data, "success")],
         [ib("✏️ تعديل المبلغ/السبب", f"adm:user:{uid}:{'add' if verb == 'إضافة' else 'sub'}")],
         [ib("❌ إلغاء", "adm:cancel_input", "danger")],
+    ])
+
+
+def admin_topup_adjust_confirm(tid: int, amount: str) -> InlineKeyboardMarkup:
+    """تأكيد ثانٍ عندما يختلف المبلغ المعدَّل كثيراً عن طلب العميل (v0.9.2)."""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [ib(f"✅ نعم، اعتمد {amount}", f"adm:top:{tid}:adjc", "success")],
+        [ib("✏️ مبلغ آخر", f"adm:top:{tid}:adj"), ib("❌ إلغاء", "adm:cancel_input", "danger")],
     ])

@@ -25,7 +25,7 @@ async def show_main_menu(message: Message, user_id: int, is_admin: bool, greet_n
     if greet:
         text = f"{greet}\n\n{text}"
     elif greet_name:
-        text = f"{T.WELCOME_BACK.format(name=greet_name)}\n\n{text}"
+        text = f"{T.WELCOME_BACK.format(name=T.esc(greet_name))}\n\n{text}"
     attention = 0
     if is_admin:
         try:
@@ -63,7 +63,7 @@ async def cmd_start(message: Message, command: CommandObject, state: FSMContext,
         await message.answer(T.WELCOME_NEW, reply_markup=K.welcome())
         return
     # الشريط السفلي يُثبَّت مع رسالة الترحيب، ثم القائمة الملوّنة
-    await message.answer(T.WELCOME_BACK.format(name=message.from_user.first_name), reply_markup=K.home_bar())
+    await message.answer(T.WELCOME_BACK.format(name=T.esc(message.from_user.first_name)), reply_markup=K.home_bar())
     await show_main_menu(message, uid, is_admin)
 
 
@@ -80,7 +80,7 @@ async def cb_accept(cb: CallbackQuery, is_admin: bool = False) -> None:
     await cb.message.edit_reply_markup(reply_markup=None)
     await cb.answer("أهلاً وسهلاً 🌟")
     # أول دخول: ترحيب "هلا" + تثبيت الشريط السفلي، ثم القائمة الملوّنة
-    await cb.message.answer(T.WELCOME_FIRST.format(name=cb.from_user.first_name), reply_markup=K.home_bar())
+    await cb.message.answer(T.WELCOME_FIRST.format(name=T.esc(cb.from_user.first_name)), reply_markup=K.home_bar())
     await show_main_menu(cb.message, cb.from_user.id, is_admin)
 
 

@@ -102,8 +102,8 @@ async def cb_settings_menu(cb: CallbackQuery) -> None:
     await cb.answer()
 
 
-@router.callback_query(F.data == "adm:svcs")
-async def cb_settings(cb: CallbackQuery) -> None:
+async def _render_services(cb: CallbackQuery) -> None:
+    """شاشة تشغيل/إيقاف الخدمات — بلا cb.answer (يجيب المستدعي مرة واحدة)."""
     svc = await settings_repo.services()
     names = {"meta": "📢 إعلانات Meta", "tg_ads": "📣 Telegram Ads", "tg_post": "📝 قنوات شريكة",
              "addons": "🎨 تصميم وكتابة", "ai_reel": "🤖 ريل سينمائي AI"}
@@ -114,6 +114,11 @@ async def cb_settings(cb: CallbackQuery) -> None:
         "⚙️ <b>تشغيل / إيقاف الخدمات</b>\nاضغط على خدمة لتبديل حالتها — يسري فوراً على كل المستخدمين.",
         reply_markup=K.InlineKeyboardMarkup(inline_keyboard=rows),
     )
+
+
+@router.callback_query(F.data == "adm:svcs")
+async def cb_settings(cb: CallbackQuery) -> None:
+    await _render_services(cb)
     await cb.answer()
 
 
@@ -126,13 +131,8 @@ async def cb_toggle_service(cb: CallbackQuery) -> None:
         return
     svc[key] = not svc[key]
     await settings_repo.set_("services", svc)
-    await cb.answer(("تم التفعيل 🟢" if svc[key] else "تم الإيقاف 🔴"))
-    await cb_settings(cb)
-
-
-@router.callback_query(F.data.in_({"adm:tickets", "adm:bc", "adm:find"}))
-async def cb_soon(cb: CallbackQuery) -> None:
-    await cb.answer("يُفعَّل في الإصدار 0.8.1 (تذاكر + بث + بحث)", show_alert=True)
+    await _render_services(cb)
+    await cb.answer("تم التفعيل 🟢" if svc[key] else "تم الإيقاف 🔴")   # إجابة واحدة فقط
 
 
 @router.callback_query(F.data == "adm:stats")

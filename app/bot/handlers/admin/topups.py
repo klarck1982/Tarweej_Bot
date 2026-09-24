@@ -26,6 +26,7 @@ router.callback_query.filter(F.from_user.id.in_(set(settings.admin_ids)))
 class AdminTopup(StatesGroup):
     reject_reason = State()
     adjust_amount = State()
+    adjust_confirm = State()
     message_user = State()
     wallet_address = State()
     wallet_holder = State()
@@ -173,13 +174,50 @@ async def msg_adjust(message: Message, state: FSMContext) -> None:
         return
     data = await state.get_data()
     tid = data["tid"]
-    await state.clear()
-    ok, new_balance, row = await topups_repo.approve(tid, message.from_user.id, amount_override=amount)
-    if not ok:
+    # حد أعلى (v0.9.2): نفس حد الشحن في إعدادات Cpanel — خطأ إصبع (1000000) لا يصبح رصيداً حقيقياً
+    limit = Decimal(str(await settings_repo.get("max_topup_usd", "1000")))
+    if amount > limit:
+        await message.answer(f"⛔ المبلغ أكبر من حد الشحن ({fmt(limit)}). اكتب مبلغاً أصغر، أو عدّل الحد من Cpanel.")
+        return
+    row = await topups_repo.get(tid)
+    if not row or row["status"] != "pending":
+        await state.clear()
         await message.answer(T.ADMIN_ALREADY_DECIDED)
         return
-    await message.answer(f"✅ اعتُمد #TOP-{tid} بمبلغ {fmt(amount)} — رصيد العميل {fmt(new_balance)}")
-    await _finish(message, message.bot, tid, ok, new_balance, row, adjusted=True)
+    requested = Decimal(str(row["amount_usd"]))
+    if requested > 0 and abs(amount - requested) / requested > Decimal("0.5"):
+        # فرق كبير عن طلب العميل ← تأكيد صريح
+        await state.set_state(AdminTopup.adjust_confirm)
+        await state.update_data(tid=tid, amount=str(amount))
+        await message.answer(
+            f"⚠️ <b>فرق كبير عن طلب العميل</b>\nطلب العميل: <b>{fmt(requested)}</b>\nالمبلغ الذي كتبته: <b>{fmt(amount)}</b>\n\n"
+            f"هل تعتمد {fmt(amount)} بدل {fmt(requested)}؟",
+            reply_markup=K.admin_topup_adjust_confirm(tid, fmt(amount)))
+        return
+    await state.clear()
+    await _approve_adjusted(message, message.bot, message.from_user.id, tid, amount)
+
+
+async def _approve_adjusted(target: Message, bot, admin_id: int, tid: int, amount: Decimal) -> None:
+    ok, new_balance, row = await topups_repo.approve(tid, admin_id, amount_override=amount)
+    if not ok:
+        await target.answer(T.ADMIN_ALREADY_DECIDED)
+        return
+    await target.answer(f"✅ اعتُمد #TOP-{tid} بمبلغ {fmt(amount)} — رصيد العميل {fmt(new_balance)}")
+    await _finish(target, bot, tid, ok, new_balance, row, adjusted=True)
+
+
+@router.callback_query(F.data.regexp(r"^adm:top:(\d+):adjc$"))
+async def cb_adjust_confirm(cb: CallbackQuery, state: FSMContext) -> None:
+    tid = int(cb.data.split(":")[2])
+    data = await state.get_data()
+    if await state.get_state() != AdminTopup.adjust_confirm.state or int(data.get("tid") or 0) != tid or not data.get("amount"):
+        await cb.answer("انتهت الجلسة — افتح الطلب من جديد", show_alert=True)
+        return
+    amount = Decimal(data["amount"])
+    await state.clear()   # قبل الاعتماد ← الضغطة الثانية ترى الجلسة منتهية
+    await cb.answer()
+    await _approve_adjusted(cb.message, cb.bot, cb.from_user.id, tid, amount)
 
 
 # ───────────── رفض ─────────────
@@ -311,17 +349,21 @@ async def _wallet_detail(code: str) -> tuple[str, object] | None:
     return "\n".join(lines), K.admin_wallet_edit(code, m)
 
 
-@router.callback_query(F.data.regexp(r"^adm:wal:(\w+)$"))
-async def cb_wallet(cb: CallbackQuery) -> None:
-    code = cb.data.split(":")[2]
+async def _render_wallet(cb: CallbackQuery, code: str) -> bool:
+    """يعرض شاشة طريقة الدفع (بلا cb.answer). CallbackQuery مجمّد في aiogram 3 فلا نعدّل cb.data."""
     view = await _wallet_detail(code)
     if not view:
-        await cb.answer()
-        return
+        return False
     try:
         await cb.message.edit_text(view[0], reply_markup=view[1])
     except Exception:  # noqa: BLE001
         await cb.message.answer(view[0], reply_markup=view[1])
+    return True
+
+
+@router.callback_query(F.data.regexp(r"^adm:wal:(\w+)$"))
+async def cb_wallet(cb: CallbackQuery) -> None:
+    await _render_wallet(cb, cb.data.split(":")[2])
     await cb.answer()
 
 
@@ -329,12 +371,13 @@ async def cb_wallet(cb: CallbackQuery) -> None:
 async def cb_wallet_toggle(cb: CallbackQuery) -> None:
     code = cb.data.split(":")[2]
     methods = await PM.get_methods()
+    note = ""
     if code in methods:
         methods[code]["enabled"] = not methods[code].get("enabled", False)
         await PM.save_methods(methods)
-        await cb.answer("تم التفعيل 🟢" if methods[code]["enabled"] else "تم الإيقاف 🔴")
-    cb.data = f"adm:wal:{code}"
-    await cb_wallet(cb)
+        note = "تم التفعيل 🟢" if methods[code]["enabled"] else "تم الإيقاف 🔴"
+    await _render_wallet(cb, code)
+    await cb.answer(note)   # إجابة واحدة فقط
 
 
 @router.callback_query(F.data.regexp(r"^adm:wal:(\w+):(edit|holder)$"))
