@@ -13,7 +13,7 @@ from app.bot import keyboards as K
 from app.bot import texts as T
 from app.config import settings
 from app.db import pool as db
-from app.db.repo import settings as settings_repo, topups as topups_repo
+from app.db.repo import topups as topups_repo
 from app.services import channels
 from app.services.pricing import fmt
 

@@ -426,7 +426,7 @@ HOW_IT_WORKS = (
 
 
 def prices_ads(tgp_min=None) -> str:
-    rows = [f"💲 <b>أسعار الإعلانات</b>\n", "<b>📢 فيسبوك / إنستغرام</b>"]
+    rows = ["💲 <b>أسعار الإعلانات</b>\n", "<b>📢 فيسبوك / إنستغرام</b>"]
     for p in P.META_PACKAGES:
         rows.append(f"{p.emoji} {p.title}: {P.fmt(p.daily)} × {P.days_word(p.days)} = <b>{P.fmt(p.price)}</b>")
     ex_daily = max(P.META_MIN_DAILY, Decimal(4))
@@ -671,6 +671,11 @@ ADMIN_ORDER_CARD = (
 ADMIN_ORDERS_EMPTY = "📦 لا توجد طلبات مفتوحة ✅"
 ADMIN_ORDERS_LIST = "📦 <b>الطلبات المفتوحة ({n})</b> — اضغط لفتح البطاقة:"
 ADMIN_ORDER_REFUND_CONFIRM = "↩️ استرداد <b>{price}</b> كاملاً للعميل وإغلاق #ORD-{id}؟ اكتب السبب بسطر واحد (سيصل للعميل):"
+ADMIN_ORDER_REFUND_NOUR_WARN = (
+    "\n\n⚠️ <b>الحملة موجودة عند Nour Ads</b> (nour_id <code>{nour_id}</code>) — الاسترداد هنا لا يوقفها. "
+    "أوقفها/ألغِها يدوياً من لوحة نور حتى لا تُصرف الميزانية."
+)
+ADMIN_ORDER_REFUND_BUSY = "⏳ #ORD-{id} قيد الإرسال إلى Nour Ads الآن — لم يُسترد شيء. انتظر دقيقة ثم افتح الطلب وأعد «↩️ استرداد»."
 ADMIN_ORDER_ALERT_NEW = "🔔 <b>طلب جديد #ORD-{id}</b> — {price} — {name}"
 ADMIN_ORDER_ALERT_STUCK = "⚠️ <b>#ORD-{id} عالق قبل نور</b>\n{note}"
 ADMIN_ORDER_ALERT_NOUR_BALANCE = (

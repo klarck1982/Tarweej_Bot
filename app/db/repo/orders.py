@@ -183,10 +183,30 @@ async def update(order_id: int, **fields) -> dict | None:
     return row_to_dict(row)
 
 
+async def transition(order_id: int, from_statuses, **fields) -> dict | None:
+    """انتقال ذري: يحدّث فقط إن كانت الحالة الحالية ضمن from_statuses — وإلا None (غيّرها طرف آخر للتو).
+
+    يمنع نمط «اقرأ ثم اكتب» من الكتابة فوق استرداد/إلغاء/تعديل حدث في اللحظة نفسها."""
+    if isinstance(from_statuses, str):
+        from_statuses = (from_statuses,)
+    sets, args = [], [order_id, list(from_statuses)]
+    for k, v in fields.items():
+        is_json = k in ("nour_payload", "nour_response", "spec", "results", "delivery")
+        args.append(json.dumps(v, ensure_ascii=False, default=str) if is_json else v)
+        cast = "::jsonb" if is_json else ""
+        sets.append(f"{k} = ${len(args)}{cast}")
+    sets.append("updated_at = now()")
+    row = await db.fetchrow(
+        f"UPDATE orders SET {', '.join(sets)} WHERE id = $1 AND status = ANY($2::text[]) RETURNING *", *args)
+    return row_to_dict(row)
+
+
 async def due_for_retry(limit: int = 10) -> list[dict]:
     rows = await db.fetch(
         "SELECT * FROM orders WHERE kind = 'meta_campaign' AND status = 'paid' "
-        "AND (next_retry_at IS NULL OR next_retry_at <= now()) ORDER BY id LIMIT $1",
+        "AND (next_retry_at IS NULL OR next_retry_at <= now()) "
+        "AND (submitting_until IS NULL OR submitting_until < now()) "
+        "ORDER BY id LIMIT $1",
         limit,
     )
     return [row_to_dict(r) for r in rows]

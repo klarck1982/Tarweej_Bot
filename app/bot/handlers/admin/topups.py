@@ -14,7 +14,7 @@ from app.bot import texts as T
 from app.bot.handlers.admin import _common as C
 from app.config import settings
 from app.db.repo import events, settings as settings_repo, topups as topups_repo
-from app.services import channels, notify
+from app.services import notify
 from app.services import payments as PM
 from app.services.pricing import fmt, money
 

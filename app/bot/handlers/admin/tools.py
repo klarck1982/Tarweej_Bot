@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal
 
 from aiogram import F, Router
 from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError, TelegramRetryAfter
@@ -290,11 +290,11 @@ async def cb_adjust_confirm(cb: CallbackQuery, state: FSMContext) -> None:
         if direction == "add":
             balance = await money.credit(uid, amount, "adjustment", ref_type="admin", note=reason, admin_id=cb.from_user.id,
                                          idem_key=f"adj-{nonce}")
-            sign, word = "+", "إضافة"
+            word = "إضافة"
         else:
             balance = await money.debit(uid, amount, "adjustment", ref_type="admin", note=reason, admin_id=cb.from_user.id,
                                         idem_key=f"adj-{nonce}")
-            sign, word = "−", "خصم"
+            word = "خصم"
     except money.DuplicateOperation:
         # ضغطة مكررة/متزامنة: التعديل نُفّذ مرة واحدة فقط بالضغطة الأولى
         await cb.answer("✅ هذا التعديل نُفّذ مسبقاً — لم يتكرر", show_alert=False)

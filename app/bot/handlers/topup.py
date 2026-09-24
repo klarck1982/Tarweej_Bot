@@ -6,7 +6,7 @@
 
 from __future__ import annotations
 
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal
 from zoneinfo import ZoneInfo
 
 from aiogram import F, Router

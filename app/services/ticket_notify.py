@@ -10,7 +10,6 @@ from aiogram import Bot
 
 from app.bot import keyboards as K
 from app.bot import texts as T
-from app.config import settings
 from app.db.repo import tickets as repo
 from app.services import channels
 from app.services.pricing import fmt

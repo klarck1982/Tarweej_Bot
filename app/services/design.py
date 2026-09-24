@@ -233,7 +233,9 @@ async def start(order_id: int, admin_id: int) -> dict | None:
     o = await _get(order_id, ("submitted",))
     if not o:
         return None
-    upd = await repo.update(order_id, status="in_progress", admin_id=admin_id, started_at=datetime.now(timezone.utc))
+    upd = await repo.transition(order_id, ("submitted",), status="in_progress", admin_id=admin_id, started_at=datetime.now(timezone.utc))
+    if not upd:
+        return None
     await events.log_event("order_status", o["user_id"], order_id, from_="submitted", to="in_progress", admin_id=admin_id)
     return upd
 
@@ -269,8 +271,10 @@ async def deliver(order_id: int, admin_id: int, files: list, text: str | None) -
     deliveries = list(o.get("delivery") or [])
     deliveries.append({"n": len(deliveries) + 1, "files": [list(f) for f in files], "text": (text or "")[:1000],
                        "at": now.isoformat(), "by": admin_id})
-    upd = await repo.update(order_id, status="delivered", delivered_at=now, approve_by=now + timedelta(hours=approve_hours()),
+    upd = await repo.transition(order_id, (o["status"],), status="delivered", delivered_at=now, approve_by=now + timedelta(hours=approve_hours()),
                             delivery=deliveries, admin_id=admin_id, due_warned_at=None, late_warned_at=None)
+    if not upd:
+        return None
     await events.log_event("order_status", o["user_id"], order_id, from_=o["status"], to="delivered", admin_id=admin_id,
                            files=len(files))
     return upd
@@ -285,7 +289,9 @@ async def approve(order_id: int, user_id: int | None, auto: bool = False, admin_
     fields: dict = dict(status="completed", completed_at=now, approve_by=None)
     if admin_id:
         fields["admin_id"] = admin_id
-    upd = await repo.update(order_id, **fields)
+    upd = await repo.transition(order_id, ("delivered",), **fields)
+    if not upd:            # طلب العميل تعديلاً في اللحظة نفسها — التعديل يفوز
+        return None
     await events.log_event("order_status", o["user_id"], order_id, from_="delivered", to="completed", auto=auto, admin_id=admin_id)
     return upd
 
@@ -334,7 +340,7 @@ async def reject(order_id: int, admin_id: int, reason: str) -> dict | None:
     if not o:
         return None
     return await orders_svc.refund(order_id, reason=reason or "تعذّر تنفيذ الطلب — أُعيد المبلغ كاملاً", new_status="rejected",
-                                   admin_id=admin_id)
+                                   admin_id=admin_id, expect=OPEN)
 
 
 async def cancel_by_user(order_id: int, user_id: int) -> dict | None:
@@ -343,7 +349,8 @@ async def cancel_by_user(order_id: int, user_id: int) -> dict | None:
     o = await repo.get(order_id)
     if not o or o["user_id"] != user_id or o.get("kind") != "design" or o["status"] != "submitted":
         return None
-    return await orders_svc.refund(order_id, reason="ألغى العميل الطلب قبل بدء العمل — استرداد كامل", new_status="cancelled")
+    return await orders_svc.refund(order_id, reason="ألغى العميل الطلب قبل بدء العمل — استرداد كامل", new_status="cancelled",
+                                   expect=("submitted",))
 
 
 async def save_brand_kit(user_id: int, logo: str | None, colors: str | None) -> None:

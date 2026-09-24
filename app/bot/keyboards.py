@@ -18,7 +18,6 @@ from aiogram.types import (
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from app.bot import texts as T
-from app.config import settings
 from app.services import cpanel as CP
 from app.services import pricing as P
 from app.services import targeting as TG
@@ -406,7 +405,7 @@ def admin_channels_menu(cfg: dict) -> InlineKeyboardMarkup:
         if ch and ch.get("id"):
             rows.append([ib(f"{CH.label(kind)} — {ch.get('title', '')[:24]} ✅", f"adm:ch:info:{kind}")])
         else:
-            rows.append([ib(f"{CH.label(kind)} — غير مربوطة", f"adm:ch:help")])
+            rows.append([ib(f"{CH.label(kind)} — غير مربوطة", "adm:ch:help")])
     rows.append([ib("❓ كيف أربط قناة؟", "adm:ch:help")])
     rows.append([ib("◀️ رجوع", "adm:settings")])
     return InlineKeyboardMarkup(inline_keyboard=rows)

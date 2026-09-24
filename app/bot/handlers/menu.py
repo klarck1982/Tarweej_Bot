@@ -7,17 +7,12 @@ T0 / D0 معاينة — معالجاتها في الخطوتين 5 و6.
 from __future__ import annotations
 
 from aiogram import F, Router
-from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 
 from app.bot import keyboards as K
 from app.bot import texts as T
-from app.config import settings
-from app.services import cpanel as CP
-from app.db import pool as db
-from app.db.repo import events, orders as orders_repo, settings as settings_repo, users as users_repo
-from app.services.pricing import fmt
+from app.db.repo import events, orders as orders_repo, settings as settings_repo
 
 router = Router(name="menu")
 

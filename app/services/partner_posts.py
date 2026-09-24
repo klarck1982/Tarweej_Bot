@@ -194,8 +194,10 @@ async def schedule(order_id: int, admin_id: int, when: datetime) -> dict | None:
     o = await repo.get(order_id)
     if not o or o.get("kind") != "tg_post" or o["status"] not in ("submitted", "in_progress"):
         return None
-    upd = await repo.update(order_id, status="in_progress", scheduled_at=when, reminded_at=None, admin_id=admin_id,
-                            last_sync_at=datetime.now(timezone.utc))
+    upd = await repo.transition(order_id, ("submitted", "in_progress"), status="in_progress", scheduled_at=when,
+                                reminded_at=None, admin_id=admin_id, last_sync_at=datetime.now(timezone.utc))
+    if not upd:
+        return None
     await events.log_event("order_status", o["user_id"], order_id, from_=o["status"], to="in_progress", admin_id=admin_id,
                            scheduled_at=when.isoformat())
     return upd
@@ -208,8 +210,10 @@ async def publish(order_id: int, admin_id: int, post_url: str) -> dict | None:
         return None
     now = datetime.now(timezone.utc)
     hours = int(o["spec"].get("hours") or 24)
-    upd = await repo.update(order_id, status="active", post_url=post_url, started_at=now, ends_at=now + timedelta(hours=hours),
-                            admin_id=admin_id, last_sync_at=now)
+    upd = await repo.transition(order_id, ("submitted", "in_progress"), status="active", post_url=post_url, started_at=now,
+                                ends_at=now + timedelta(hours=hours), admin_id=admin_id, last_sync_at=now)
+    if not upd:            # أُلغي/رُفض للتو
+        return None
     await events.log_event("order_status", o["user_id"], order_id, from_=o["status"], to="active", admin_id=admin_id)
     return upd
 
@@ -225,7 +229,9 @@ async def finish(order_id: int, admin_id: int | None, views: int | None = None) 
         fields["admin_id"] = admin_id
     if views is not None:
         fields["results"] = {**(o.get("results") or {}), "views": int(views)}
-    upd = await repo.update(order_id, **fields)
+    upd = await repo.transition(order_id, ("active",), **fields)
+    if not upd:
+        return None
     await events.log_event("order_status", o["user_id"], order_id, from_="active", to="completed", admin_id=admin_id, auto=admin_id is None)
     return upd
 
@@ -244,7 +250,8 @@ async def reject(order_id: int, admin_id: int, reason: str) -> dict | None:
     if not o or o.get("kind") != "tg_post" or o["status"] not in ("submitted", "in_progress", "active"):
         return None
     return await orders_svc.refund(order_id, reason=reason or "تعذّر النشر في القناة — أُعيد المبلغ كاملاً",
-                                   new_status="rejected", admin_id=admin_id)
+                                   new_status="rejected", admin_id=admin_id,
+                                   expect=("submitted", "in_progress", "active"))
 
 
 async def cancel_by_user(order_id: int, user_id: int) -> dict | None:
@@ -253,7 +260,8 @@ async def cancel_by_user(order_id: int, user_id: int) -> dict | None:
     o = await repo.get(order_id)
     if not o or o["user_id"] != user_id or o.get("kind") != "tg_post" or o["status"] != "submitted":
         return None
-    return await orders_svc.refund(order_id, reason="ألغى العميل الطلب قبل الجدولة — استرداد كامل", new_status="cancelled")
+    return await orders_svc.refund(order_id, reason="ألغى العميل الطلب قبل الجدولة — استرداد كامل", new_status="cancelled",
+                                   expect=("submitted",))
 
 
 # ───────────── المجدول ─────────────

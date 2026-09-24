@@ -12,7 +12,7 @@ from app.bot import texts as T
 from app.bot.handlers.admin import _common as C
 from app.config import settings
 from app.db.repo import events, orders as repo, settings as settings_repo
-from app.services import nour, order_notify as ON, orders as orders_svc, pricing as P
+from app.services import nour, order_notify as ON, orders as orders_svc
 from app.services import validators as V
 from app.services.pricing import fmt
 
@@ -149,7 +149,9 @@ async def cb_refund(cb: CallbackQuery, state: FSMContext) -> None:
         await cb.answer("هذا الطلب مغلق", show_alert=True)
         return
     await C.ask_input(cb, state, AdminOrder.refund_reason, {"oid": oid},
-                      T.ADMIN_ORDER_REFUND_CONFIRM.format(price=fmt(o["price_usd"] - o.get("refunded_usd", 0)), id=oid),
+                      T.ADMIN_ORDER_REFUND_CONFIRM.format(price=fmt(o["price_usd"] - o.get("refunded_usd", 0)), id=oid)
+                      + (T.ADMIN_ORDER_REFUND_NOUR_WARN.format(nour_id=o["nour_id"])
+                         if o.get("nour_id") and o.get("kind") == "meta_campaign" else ""),
                       K.cancel_input("adm:cancel_input"))
 
 
@@ -160,7 +162,12 @@ async def msg_refund(message: Message, state: FSMContext) -> None:
         return
     data = await state.get_data()
     await state.clear()
-    o = await orders_svc.refund(data["oid"], reason=message.text.strip(), new_status="refunded", admin_id=message.from_user.id)
+    try:
+        o = await orders_svc.refund(data["oid"], reason=message.text.strip(), new_status="refunded",
+                                    admin_id=message.from_user.id, expect=repo.OPEN_STATUSES)
+    except orders_svc.RefundBusy:
+        await message.answer(T.ADMIN_ORDER_REFUND_BUSY.format(id=data["oid"]))
+        return
     if not o:
         await message.answer("لم يُنفَّذ الاسترداد (الطلب مغلق أو مُسترد سابقاً).")
         return

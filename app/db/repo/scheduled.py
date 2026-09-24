@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, time
-from decimal import Decimal
 
 from app.db import pool as db
 

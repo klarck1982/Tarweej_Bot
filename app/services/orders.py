@@ -18,7 +18,6 @@ from decimal import Decimal
 from app.db import pool as db
 from app.db.repo import events, orders as repo, settings as settings_repo
 from app.services import money as money_svc, nour, pricing as P, targeting as TG
-from app.services.money import InsufficientBalance
 from app.services.pricing import money
 
 log = logging.getLogger("orders")
@@ -212,12 +211,47 @@ async def confirm(user_id: int, spec: dict, draft_id: int | None = None, checkou
 
 # ───────────── الإرسال إلى نور ─────────────
 
+SUBMIT_CLAIM_MINUTES = 3        # مدة حجز الإرسال (مهلة HTTP 25ث × بحث حتى 3 صفحات يبقى أقل منها)
+
+
+class RefundBusy(Exception):
+    """الطلب قيد الإرسال إلى الشريك الآن — الاسترداد ممنوع حتى تُحفظ النتيجة (أقل من دقيقة عادةً)."""
+
+
+async def _claim_submit(order_id: int) -> dict | None:
+    """حجز ذري للإرسال: ينجح لطرف واحد فقط، وفقط إن كان الطلب ما زال paid."""
+    row = await db.fetchrow(
+        "UPDATE orders SET submitting_until = now() + make_interval(mins => $2), updated_at = now() "
+        "WHERE id = $1 AND status = 'paid' AND kind = 'meta_campaign' "
+        "AND (submitting_until IS NULL OR submitting_until < now()) RETURNING *",
+        order_id, SUBMIT_CLAIM_MINUTES,
+    )
+    return repo.row_to_dict(row)
+
+
+async def _save_claimed(order_id: int, **fields) -> dict | None:
+    """كتابة نتيجة الإرسال — فقط إن بقي الطلب paid (الحجز يضمن ذلك)، مع فكّ الحجز."""
+    upd = await repo.transition(order_id, ("paid",), submitting_until=None, **fields)
+    if upd is None:
+        log.error("ORD-%s: status changed during Nour submit — result not saved: %s", order_id, fields.get("nour_id"))
+        await events.log_event("order_submit_conflict", None, order_id, nour_id=fields.get("nour_id"))
+        await db.execute("UPDATE orders SET submitting_until = NULL WHERE id = $1", order_id)
+        return await repo.get(order_id)
+    return upd
+
+
 async def submit(order_id: int) -> dict:
-    """يرسل الطلب إلى نور (أو المحاكاة). يعيد الطلب المحدَّث. لا يرمي استثناءات — النتيجة في status/note."""
-    order = await repo.get(order_id)
-    if not order or order["status"] != "paid" or order.get("kind") != "meta_campaign":
-        return order
-    payload = build_nour_payload(order)
+    """يرسل الطلب إلى نور (أو المحاكاة). يعيد الطلب المحدَّث. لا يرمي استثناءات — النتيجة في status/note.
+
+    محمي بحجز ذري: لا يُرسل الطلب مرتين معاً، ولا يمكن استرداده أثناء الإرسال."""
+    order = await _claim_submit(order_id)
+    if not order:
+        return await repo.get(order_id)
+    try:
+        payload = build_nour_payload(order)
+    except Exception:
+        await db.execute("UPDATE orders SET submitting_until = NULL WHERE id = $1", order_id)
+        raise
     key = order.get("idempotency_key") or f"ord-{order_id}"
     attempts = int(order.get("submit_attempts") or 0) + 1
     client = nour.client()
@@ -225,19 +259,29 @@ async def submit(order_id: int) -> dict:
         res = await client.create_campaign(payload, key)
     except nour.NourError as e:
         return await _handle_submit_error(order, e, payload, attempts)
-    charged = res.get("charged")
+    except BaseException:
+        await db.execute("UPDATE orders SET submitting_until = NULL WHERE id = $1", order_id)
+        raise
+    return await _mark_submitted(order, res.get("id"), res.get("charged"), "pending_admin", payload, res.get("raw"),
+                                 attempts, client.dry_run)
+
+
+async def _mark_submitted(order: dict, nour_id, charged, nour_status: str, payload: dict, raw, attempts: int,
+                          dry_run: bool, local_status: str = "submitted") -> dict:
+    order_id = order["id"]
     note = None
     tol = Decimal(str(await settings_repo.get("order_charge_tolerance_usd", "0.05")))
     if charged is not None and abs(Decimal(charged) - Decimal(order["cost_usd"])) > tol:
         note = f"⚠️ فرق تكلفة: نور خصم {P.fmt(charged)} والمتوقع {P.fmt(order['cost_usd'])}"
-    updated = await repo.update(
-        order_id, status="submitted", nour_id=str(res["id"]), nour_status="pending_admin",
-        charged_usd=money(charged) if charged is not None else None, submitted_at=datetime.now(timezone.utc),
-        submit_attempts=attempts, next_retry_at=None, nour_payload=payload, nour_response=res.get("raw"),
-        note=note, last_sync_at=datetime.now(timezone.utc),
+    now = datetime.now(timezone.utc)
+    updated = await _save_claimed(
+        order_id, status=local_status, nour_id=str(nour_id), nour_status=nour_status,
+        charged_usd=money(charged) if charged is not None else None, submitted_at=now,
+        submit_attempts=attempts, next_retry_at=None, nour_payload=payload, nour_response=raw,
+        note=note, last_sync_at=now,
     )
-    await events.log_event("order_submitted", order["user_id"], order_id, nour_id=str(res["id"]),
-                           charged=str(charged), dry_run=client.dry_run)
+    await events.log_event("order_submitted", order["user_id"], order_id, nour_id=str(nour_id),
+                           charged=str(charged), dry_run=dry_run)
     return updated
 
 
@@ -247,44 +291,80 @@ async def _handle_submit_error(order: dict, e: nour.NourError, payload: dict, at
     await events.log_event("order_submit_error", order["user_id"], oid, code=e.code, http=e.http, attempt=attempts)
     if e.code == "duplicate_request":
         # أُرسل سابقاً ولم نحفظ الرد — نبحث بعنوان الحملة
-        found = await nour.client().find_by_title(f"ORD-{oid}")
+        found = await _find_campaign(oid)
         if found:
-            return await repo.update(oid, status=NOUR_TO_LOCAL.get(found.get("status"), "submitted"),
-                                     nour_id=str(found.get("id")), nour_status=found.get("status"),
-                                     charged_usd=money(found.get("budget_charged")) if found.get("budget_charged") is not None else None,
-                                     submitted_at=now, submit_attempts=attempts, next_retry_at=None,
-                                     nour_payload=payload, nour_response=found, last_sync_at=now)
-        return await repo.update(oid, submit_attempts=attempts, next_retry_at=now + timedelta(hours=6),
-                                 note="duplicate_request ولم نجد الحملة — راجع لوحة نور يدوياً", nour_payload=payload)
+            return await _found_to_submitted(order, found, payload, attempts)
+        return await _save_claimed(oid, submit_attempts=attempts, next_retry_at=now + timedelta(hours=6),
+                                   note="duplicate_request ولم نجد الحملة — راجع لوحة نور يدوياً", nour_payload=payload)
     if e.code == "insufficient_balance":
         # رصيدنا عند نور لا يكفي — الطلب ينتظر، مال العميل محفوظ، الأدمن يشحن ثم يُعاد تلقائياً
-        return await repo.update(oid, submit_attempts=attempts, next_retry_at=now + timedelta(minutes=RETRY_MINUTES_BALANCE),
-                                 note=f"رصيد نور غير كافٍ (المطلوب {e.details.get('required', '?')}$ — المتاح {e.details.get('balance', '?')}$)",
-                                 nour_payload=payload, nour_response={"error": e.code, "details": e.details})
+        return await _save_claimed(oid, submit_attempts=attempts, next_retry_at=now + timedelta(minutes=RETRY_MINUTES_BALANCE),
+                                   note=f"رصيد نور غير كافٍ (المطلوب {e.details.get('required', '?')}$ — المتاح {e.details.get('balance', '?')}$)",
+                                   nour_payload=payload, nour_response={"error": e.code, "details": e.details})
     if e.code in ("unauthorized", "forbidden"):
-        return await repo.update(oid, submit_attempts=attempts, next_retry_at=now + timedelta(hours=1),
-                                 note=f"توكن نور مرفوض ({e.code}) — راجع NOUR_ADS_TOKEN", nour_payload=payload,
-                                 nour_response={"error": e.code})
+        return await _save_claimed(oid, submit_attempts=attempts, next_retry_at=now + timedelta(hours=1),
+                                   note=f"توكن نور مرفوض ({e.code}) — راجع NOUR_ADS_TOKEN", nour_payload=payload,
+                                   nour_response={"error": e.code})
     if e.retryable and attempts < MAX_SUBMIT_ATTEMPTS:
-        return await repo.update(oid, submit_attempts=attempts, next_retry_at=now + timedelta(minutes=RETRY_MINUTES_OTHER),
-                                 note=f"خطأ مؤقت من نور: {e.code} — محاولة {attempts}/{MAX_SUBMIT_ATTEMPTS}",
-                                 nour_payload=payload, nour_response={"error": e.code, "http": e.http})
-    # فشل نهائي → استرداد كامل
-    await refund(oid, reason=f"تعذّر الإرسال إلى الشريك ({e.code})", new_status="failed_submit")
+        return await _save_claimed(oid, submit_attempts=attempts, next_retry_at=now + timedelta(minutes=RETRY_MINUTES_OTHER),
+                                   note=f"خطأ مؤقت من نور: {e.code} — محاولة {attempts}/{MAX_SUBMIT_ATTEMPTS}",
+                                   nour_payload=payload, nour_response={"error": e.code, "http": e.http})
+    if e.retryable:
+        # استُنفدت المحاولات بأخطاء مؤقتة (شبكة/مهلة/5xx): ربما أنشأت نور الحملة ولم يصلنا الرد —
+        # نتحقق قبل أي استرداد، ولا نسترد أبداً مبلغ حملة قد تكون تعمل.
+        try:
+            found = await _find_campaign(oid, raise_errors=True)
+        except nour.NourError as e2:
+            return await _save_claimed(oid, submit_attempts=attempts, next_retry_at=now + timedelta(minutes=RETRY_MINUTES_BALANCE),
+                                       note=f"⚠️ تعذّر الإرسال والتحقق من نور ({e.code}/{e2.code}) — لم يُسترد شيء، "
+                                            "راجع لوحة نور ثم أعد الإرسال أو استرد يدوياً",
+                                       nour_payload=payload, nour_response={"error": e.code, "verify_error": e2.code})
+        if found:
+            return await _found_to_submitted(order, found, payload, attempts)
+    # فشل نهائي مؤكَّد (رفض صريح من نور، أو تحقّقنا أن الحملة غير موجودة) → استرداد كامل
+    await refund(oid, reason=f"تعذّر الإرسال إلى الشريك ({e.code})", new_status="failed_submit", expect=("paid",),
+                 _claimed=True)
+    await db.execute("UPDATE orders SET submitting_until = NULL WHERE id = $1", oid)
     return await repo.update(oid, submit_attempts=attempts, next_retry_at=None, nour_payload=payload,
                              nour_response={"error": e.code, "http": e.http, "final": True})
+
+
+async def _find_campaign(oid: int, raise_errors: bool = False) -> dict | None:
+    try:
+        return await nour.client().find_by_title(f"ORD-{oid}")
+    except nour.NourError:
+        if raise_errors:
+            raise
+        return None
+
+
+async def _found_to_submitted(order: dict, found: dict, payload: dict, attempts: int) -> dict:
+    st = found.get("status") or "pending_admin"
+    local = NOUR_TO_LOCAL.get(st, "submitted")
+    if local == "rejected":
+        local = "submitted"          # المزامنة التالية تطبّق الرفض وتسترد عبر المسار المعتاد
+    return await _mark_submitted(order, found.get("id"), found.get("budget_charged"), st, payload, found,
+                                 attempts, nour.is_dry_run(), local_status=local)
 
 
 # ───────────── الاسترداد ─────────────
 
 async def refund(order_id: int, reason: str, new_status: str = "refunded", admin_id: int | None = None,
-                 amount: Decimal | None = None) -> dict | None:
-    """يعيد المبلغ (كاملاً افتراضياً) للعميل ويغيّر الحالة — معاملة واحدة، ولا يسترد مرتين."""
+                 amount: Decimal | None = None, expect: tuple | None = None, _claimed: bool = False) -> dict | None:
+    """يعيد المبلغ (كاملاً افتراضياً) للعميل ويغيّر الحالة — معاملة واحدة، ولا يسترد مرتين.
+
+    expect: الحالات المسموحة — تُفحص داخل القفل (لا يكفي فحص المستدعي قبله).
+    يرمي RefundBusy إن كان الطلب قيد الإرسال إلى نور الآن."""
     async with db.pool().acquire() as c:
         async with c.transaction():
-            row = await c.fetchrow("SELECT * FROM orders WHERE id = $1 FOR UPDATE", order_id)
+            row = await c.fetchrow("SELECT *, (submitting_until > now()) AS busy FROM orders WHERE id = $1 FOR UPDATE",
+                                   order_id)
             if not row or row["status"] in ("awaiting_payment", "cancelled"):
                 return None
+            if expect is not None and row["status"] not in expect:
+                return None
+            if row["busy"] and not _claimed:
+                raise RefundBusy(order_id)
             already = Decimal(row["refunded_usd"] or 0)
             total = Decimal(row["price_usd"])
             amt = money(amount if amount is not None else total - already)
@@ -310,14 +390,16 @@ async def apply_nour_status(order_id: int, nour_status: str, raw: dict | None = 
         return None, False
     local = NOUR_TO_LOCAL.get(nour_status)
     now = datetime.now(timezone.utc)
-    if local is None or order["status"] in repo.FINAL_STATUSES:
+    cur = order["status"]
+    if local is None or cur in repo.FINAL_STATUSES:
         await repo.update(order_id, nour_status=nour_status, last_sync_at=now, nour_response=raw)
         return order, False
-    if local == order["status"]:
+    if local == cur:
         await repo.update(order_id, nour_status=nour_status, last_sync_at=now)
         return order, False
     if local == "rejected":
-        updated = await refund(order_id, reason="رفض الشريك الإعلان — أُعيد المبلغ كاملاً", new_status="rejected")
+        updated = await refund(order_id, reason="رفض الشريك الإعلان — أُعيد المبلغ كاملاً", new_status="rejected",
+                               expect=(cur,))
         await repo.update(order_id, nour_status=nour_status, last_sync_at=now, nour_response=raw)
         return await repo.get(order_id), updated is not None
     fields = dict(status=local, nour_status=nour_status, last_sync_at=now, nour_response=raw)
@@ -325,8 +407,10 @@ async def apply_nour_status(order_id: int, nour_status: str, raw: dict | None = 
         fields["started_at"] = now
     if local == "completed":
         fields["completed_at"] = now
-    updated = await repo.update(order_id, **fields)
-    await events.log_event("order_status", order["user_id"], order_id, from_=order["status"], to=local)
+    updated = await repo.transition(order_id, (cur,), **fields)
+    if updated is None:            # تغيّرت الحالة للتو (استرداد أدمن مثلاً) — لا نكتب فوقها
+        return await repo.get(order_id), False
+    await events.log_event("order_status", order["user_id"], order_id, from_=cur, to=local)
     return updated, True
 
 
@@ -363,7 +447,10 @@ async def manual_transition(order_id: int, to: str, admin_id: int, note: str | N
         return order, False
     now = datetime.now(timezone.utc)
     if to == "rejected":
-        await refund(order_id, reason=note or "رفض تيليغرام الإعلان — أُعيد المبلغ كاملاً", new_status="rejected", admin_id=admin_id)
+        done = await refund(order_id, reason=note or "رفض تيليغرام الإعلان — أُعيد المبلغ كاملاً", new_status="rejected",
+                            admin_id=admin_id, expect=(order["status"],))
+        if not done:
+            return await repo.get(order_id), False
         await repo.update(order_id, nour_status="rejected", last_sync_at=now)
         return await repo.get(order_id), True
     fields: dict = dict(status=to, admin_id=admin_id, last_sync_at=now)
@@ -375,7 +462,9 @@ async def manual_transition(order_id: int, to: str, admin_id: int, note: str | N
         fields["completed_at"] = now
         if results:
             fields["results"] = results
-    updated = await repo.update(order_id, **fields)
+    updated = await repo.transition(order_id, (order["status"],), **fields)
+    if not updated:            # غيّرها طرف آخر للتو
+        return await repo.get(order_id), False
     await events.log_event("order_status", order["user_id"], order_id, from_=order["status"], to=to, admin_id=admin_id)
     return updated, True
 
@@ -386,6 +475,9 @@ async def apply_revision(order_id: int, user_id: int, new_text: str) -> dict | N
     if not order or order["user_id"] != user_id or order["status"] != "needs_revision":
         return None
     spec = {**order["spec"], "text": new_text, "text_prev": order["spec"].get("text")}
-    updated = await repo.update(order_id, status="submitted", spec=spec, revision_note=None, last_sync_at=datetime.now(timezone.utc))
+    updated = await repo.transition(order_id, ("needs_revision",), status="submitted", spec=spec, revision_note=None,
+                                    last_sync_at=datetime.now(timezone.utc))
+    if not updated:
+        return None
     await events.log_event("order_revised", user_id, order_id)
     return updated

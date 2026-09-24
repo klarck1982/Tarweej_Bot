@@ -136,7 +136,6 @@ _late_notified: set[int] = set()
 async def _scheduled_designs(bot: Bot) -> None:
     """📅 إرسال التصميم + النص المجدول لكل مشترك، مع حجز يمنع التكرار وإعادة محاولة الفشل."""
     from app.bot import texts as T
-    from app.services import scheduled as SD
     from app.db.repo import scheduled as SR
     from app.services import order_notify as ON
     for _ in range(10):

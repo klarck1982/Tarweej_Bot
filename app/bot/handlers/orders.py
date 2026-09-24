@@ -9,7 +9,6 @@ from aiogram.types import CallbackQuery, InputMediaPhoto, InputMediaVideo, Messa
 
 from app.bot import keyboards as K
 from app.bot import texts as T
-from app.config import settings
 from app.services import cpanel as CP
 from app.db.repo import orders as repo
 from app.services import order_notify as ON, orders as orders_svc, pricing as P, targeting as TG
