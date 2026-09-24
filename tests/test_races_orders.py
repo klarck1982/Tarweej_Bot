@@ -104,7 +104,7 @@ def fake_nour(monkeypatch):
         holder["f"] = f
         monkeypatch.setattr(nour, "client", lambda: f)
         monkeypatch.setattr(nour, "is_dry_run", lambda: True)
-        monkeypatch.setattr(O, "build_nour_payload", lambda order: {"title": f"ORD-{order['id']}"})
+        monkeypatch.setattr(O, "build_nour_payload", lambda order, fb="": {"title": f"ORD-{order['id']}", "telegram_username": "cust"})
         return f
     return install
 

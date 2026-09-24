@@ -230,7 +230,9 @@ async def msg_fallback(message: Message, state: FSMContext) -> None:
     await state.clear()
     await settings_repo.set_("admin_fallback_username", u)
     await events.log_event("fallback_username_set", message.from_user.id, username=u)
-    await message.answer(T.ADMIN_FALLBACK_SAVED.format(username=u), reply_markup=K.admin_settings_menu())
+    woken = await repo.wake_waiting_username()
+    await message.answer(T.ADMIN_FALLBACK_SAVED.format(username=u)
+                         + (T.ADMIN_FALLBACK_WOKEN.format(n=woken) if woken else ""), reply_markup=K.admin_settings_menu())
 
 
 # ───────────── 📣 Telegram Ads: انتقالات يدوية ─────────────

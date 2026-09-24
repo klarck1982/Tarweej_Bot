@@ -4,10 +4,12 @@
 """
 from __future__ import annotations
 
-import asyncio, random, re, sys
+import asyncio, os, random, re, sys
 from decimal import Decimal
 
 from harness import *  # noqa
+OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "results")
+os.makedirs(OUT, exist_ok=True)
 
 random.seed(7)
 
@@ -180,12 +182,16 @@ async def seed(env):
                                   "total_items": 7, "duration_days": 7, "send_time": "20:00"})
     await money.credit(U, Decimal("1000"), "topup", note="seed")
     await money.credit(U3, Decimal("200"), "topup", note="seed")
+    # نور يشترط telegram_username: التشغيل الحقيقي يضبط معرّفاً احتياطياً للعملاء بلا معرّف (U2)
+    # (حالة «بلا معرّف احتياطي» مغطاة في tests/_sim/review3/sim_no_username.py)
+    from app.db.repo import settings as settings_repo
+    await settings_repo.set_("admin_fallback_username", "tarweej_admin")
     await pricing.refresh(); await cpanel.refresh_runtime()
 
 
 async def main():
     steps = int(sys.argv[1]) if len(sys.argv) > 1 else 400
-    env = await Env(verbose=True, logfile="/home/user/Tarweej_Bot/tests/_sim/explore/results/crawl_log.txt").boot()
+    env = await Env(verbose=True, logfile=os.path.join(OUT, "crawl_log.txt")).boot()
     await seed(env)
     print("══ 1) العميل الغني (U) يستكشف كل شيء")
     u = await Crawler(env.actor(U, "user-rich"), steps).run()
@@ -238,7 +244,7 @@ async def main():
         if Decimal(r["balance_usd"]) < 0:
             ISSUES.add("critical", "negative-balance", f"المستخدم {r['tg_id']} رصيده سالب {r['balance_usd']}", where="integrity")
     print("   الحالات التي زارها المستكشف:", sorted(u.states_seen | u2.states_seen | adm.states_seen))
-    report("/home/user/Tarweej_Bot/tests/_sim/explore/results/crawl_issues.json", "نتيجة الاستكشاف الآلي")
+    report(os.path.join(OUT, "crawl_issues.json"), "نتيجة الاستكشاف الآلي")
     await env.close()
 
 if __name__ == "__main__":

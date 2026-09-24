@@ -4,14 +4,14 @@
 """
 from __future__ import annotations
 
-import asyncio, re, sys
+import asyncio, os, re, sys
 from decimal import Decimal
 
 from harness import *  # noqa
 from crawler import seed  # noqa
 
 D = Decimal
-OUT = "/home/user/Tarweej_Bot/tests/_sim/explore/results"
+OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "results")
 
 
 def clean(t):

@@ -21,7 +21,7 @@ async def main():
     from app.db.repo import users
     from app.services import money as M, orders as O, nour
     nour.client = lambda: SlowNour()
-    O.build_nour_payload = lambda order: {"title": f"ORD-{order['id']}", "budget": str(order["cost_usd"])}
+    O.build_nour_payload = lambda order, fb="": {"title": f"ORD-{order['id']}", "budget": str(order["cost_usd"]), "telegram_username": "cust"}
     import random; uid = random.randint(10**9, 2*10**9)
     await users.upsert_user(uid, "r", None); await M.credit(uid, Decimal("100"), "topup")
     spec = {"kind": "tg_ads", "budget": "10", "addons": []}

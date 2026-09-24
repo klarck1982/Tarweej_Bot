@@ -209,7 +209,11 @@ async def admin_card_text(order: dict, media_count: int) -> str:
     if addons:
         addon_txt = " · ✍️ " + " + ".join(P.ADDONS[a]["title"] for a in addons if a in P.ADDONS)
     uname = f"@{order['user_username']}" if order.get("user_username") else ""
-    tg = f"@{spec['tg_username']}" if spec.get("tg_username") else "⚠️ بلا معرّف (يُرسل معرّفك الاحتياطي)"
+    if spec.get("tg_username"):
+        tg = f"@{spec['tg_username']}"
+    else:
+        fb = await orders_svc.fallback_username()
+        tg = f"⚠️ بلا معرّف (يُرسل معرّفك الاحتياطي @{esc(fb)})" if fb else "⛔ بلا معرّف والمعرّف الاحتياطي غير مضبوط"
     note = f"\n📌 <i>{esc(order['note'])}</i>" if order.get("note") else ""
     return T.ADMIN_ORDER_CARD.format(
         icon=orders_svc.STATUS_ICON.get(order["status"], "•"), id=order["id"], status=orders_svc.STATUS_NAME.get(order["status"], order["status"]),
@@ -241,8 +245,11 @@ async def notify_admins_new_order(bot: Bot, order_id: int) -> None:
     if msg_ids:
         await repo.set_messages(order_id, admin_msg_ids=msg_ids)
     if order["status"] == "paid" and order.get("note"):
-        if "رصيد نور" in order["note"]:
-            await notify_admins_text(bot, T.ADMIN_ORDER_ALERT_NOUR_BALANCE.format(id=order_id, note=esc(order["note"])))
+        if "رصيد نور" in order["note"] or "المعرّف الاحتياطي" in order["note"]:
+            if "المعرّف الاحتياطي" in order["note"]:
+                await notify_admins_text(bot, T.ADMIN_ORDER_ALERT_STUCK.format(id=order_id, note=esc(order["note"])))
+            else:
+                await notify_admins_text(bot, T.ADMIN_ORDER_ALERT_NOUR_BALANCE.format(id=order_id, note=esc(order["note"])))
             # العميل: طمأنة بأن الطلب مقبول وقد يتأخر قليلاً (بلا ذكر رصيدنا)
             try:
                 await bot.send_message(order["user_id"], T.META_DELAY_NOTICE.format(id=order_id))

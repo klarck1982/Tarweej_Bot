@@ -31,7 +31,11 @@ TIMEOUT = aiohttp.ClientTimeout(total=25)
 
 # حالات نور كما في الوثائق (approved = in_progress قديم)
 NOUR_STATUSES = ("pending_admin", "in_progress", "approved", "active", "paused", "completed", "rejected")
-NON_RETRYABLE = {"invalid_platform", "budget_too_low", "not_found", "bad_request", "validation_error"}
+NON_RETRYABLE = {"invalid_platform", "budget_too_low", "not_found", "bad_request", "validation_error",
+                 # حقول ناقصة/غير صالحة — إعادة الإرسال بنفس البيانات لن تنجح (رموز ووردبريس + الشائعة)
+                 "missing_field", "missing_fields", "invalid_field", "invalid_param", "invalid_params",
+                 "rest_missing_callback_param", "rest_invalid_param", "invalid_telegram_username",
+                 "invalid_whatsapp_number", "invalid_duration", "invalid_goal", "invalid_targeting"}
 
 
 class NourError(Exception):

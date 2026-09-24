@@ -107,8 +107,23 @@ def compute_prices(spec: dict) -> tuple[Decimal, Decimal, Decimal]:
     return budget, money(price), cost
 
 
+NO_USERNAME_NOTE = "⚠️ العميل بلا معرّف تيليغرام والمعرّف الاحتياطي غير مضبوط — نور يشترطه. اضبطه من ⚙️ الإعدادات ← 👤 المعرّف الاحتياطي فيُعاد الإرسال تلقائياً"
+
+
+def clean_username(raw) -> str:
+    return str(raw or "").strip().lstrip("@").strip()
+
+
+async def fallback_username() -> str:
+    """معرّف الأدمن الاحتياطي (بدون @) — يُرسل لنور حين لا يملك العميل معرّفاً، أو "" إن لم يُضبط."""
+    return clean_username(await settings_repo.get("admin_fallback_username", "") or "")
+
+
 def build_nour_payload(order: dict, fallback_username: str = "") -> dict:
-    """يحوّل spec إلى جسم POST /campaigns؛ fallback_username محفوظ للتوافق ولا يُرسل للعميل بدلاً من معرفه."""
+    """يحوّل spec إلى جسم POST /campaigns.
+
+    telegram_username إلزامي عند نور (وثائق v1.5): معرّف العميل، وإلا المعرّف الاحتياطي للأدمن
+    (يتواصل مدير الحملة مع الأدمن الذي ينقل للعميل). لا يُرسل فارغاً أبداً — submit() يوقف الطلب قبل ذلك."""
     spec = order["spec"]
     daily = Decimal(str(spec["daily"]))
     platform = spec["platform"]
@@ -118,9 +133,7 @@ def build_nour_payload(order: dict, fallback_username: str = "") -> dict:
         "goal": spec.get("goal", "post_promotion"),
         "duration_days": int(spec["days"]),
         "whatsapp_number": spec["whatsapp"],
-        # لا نرسل معرف الأدمن كبديل: إذا لم يملك العميل @username يتواصل Nour معه عبر واتساب فقط.
-        # Telegram ID الرقمي لا يمكن لـ Nour استخدامه لبدء محادثة خارج البوت.
-        "telegram_username": spec.get("tg_username") or "",
+        "telegram_username": clean_username(spec.get("tg_username")) or clean_username(fallback_username),
         "targeting": {
             "countries": {spec["country"]: TG.validate_provinces(spec["country"], spec.get("provinces") or ["all"])},
             "gender": spec.get("gender", "all"),
@@ -248,10 +261,15 @@ async def submit(order_id: int) -> dict:
     if not order:
         return await repo.get(order_id)
     try:
-        payload = build_nour_payload(order)
+        payload = build_nour_payload(order, await fallback_username())
     except Exception:
         await db.execute("UPDATE orders SET submitting_until = NULL WHERE id = $1", order_id)
         raise
+    if not payload.get("telegram_username"):
+        # نور سيرفض الطلب حتماً — لا نرسله ولا نسترد: ينتظر مدفوعاً حتى يضبط الأدمن المعرّف الاحتياطي
+        await events.log_event("order_waiting_username", order["user_id"], order_id)
+        return await _save_claimed(order_id, next_retry_at=datetime.now(timezone.utc) + timedelta(minutes=RETRY_MINUTES_BALANCE),
+                                   note=NO_USERNAME_NOTE, nour_payload=payload)
     key = order.get("idempotency_key") or f"ord-{order_id}"
     attempts = int(order.get("submit_attempts") or 0) + 1
     client = nour.client()

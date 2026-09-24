@@ -201,6 +201,14 @@ async def transition(order_id: int, from_statuses, **fields) -> dict | None:
     return row_to_dict(row)
 
 
+async def wake_waiting_username() -> int:
+    """بعد ضبط المعرّف الاحتياطي: الطلبات المنتظرة بسببه تُعاد في الدورة التالية للمجدول بدل انتظار 30 دقيقة."""
+    res = await db.execute(
+        "UPDATE orders SET next_retry_at = now(), updated_at = now() WHERE kind = 'meta_campaign' AND status = 'paid' "
+        "AND note LIKE '%المعرّف الاحتياطي غير مضبوط%'")
+    return int(res.split()[-1]) if res else 0
+
+
 async def due_for_retry(limit: int = 10) -> list[dict]:
     rows = await db.fetch(
         "SELECT * FROM orders WHERE kind = 'meta_campaign' AND status = 'paid' "

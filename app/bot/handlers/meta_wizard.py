@@ -479,6 +479,13 @@ async def msg_whatsapp(message: Message, state: FSMContext) -> None:
     await message.answer(T.META_WHATSAPP_CONFIRM.format(wa=wa), reply_markup=K.meta_whatsapp_confirm())
 
 
+async def _username_screen(cb: CallbackQuery) -> None:
+    """شاشة «ما إلك معرّف»: زر المتابعة بدونه يظهر فقط إن ضبط الأدمن المعرّف الاحتياطي (نور يشترط معرّفاً)."""
+    allow_skip = bool(await orders_svc.fallback_username())
+    await _edit(cb, T.META_USERNAME_MISSING + (T.META_USERNAME_SKIP_LINE if allow_skip else T.META_USERNAME_REQUIRED_LINE),
+                K.meta_username_missing(allow_skip))
+
+
 @router.callback_query(Meta.choosing, F.data == "meta:wa_ok")
 async def cb_wa_ok(cb: CallbackQuery, state: FSMContext) -> None:
     d = await state.get_data()
@@ -486,10 +493,10 @@ async def cb_wa_ok(cb: CallbackQuery, state: FSMContext) -> None:
     if uname:
         await state.update_data(tg_username=uname)
         await _show_summary(cb, state)
-    elif d.get("uname_skipped") or d.get("editing"):
+    elif (d.get("uname_skipped") or d.get("editing")) and await orders_svc.fallback_username():
         await _show_summary(cb, state)
     else:
-        await _edit(cb, T.META_USERNAME_MISSING, K.meta_username_missing())
+        await _username_screen(cb)
     await cb.answer()
 
 
@@ -507,6 +514,10 @@ async def cb_uname_check(cb: CallbackQuery, state: FSMContext) -> None:
 
 @router.callback_query(Meta.choosing, F.data == "meta:uname_skip")
 async def cb_uname_skip(cb: CallbackQuery, state: FSMContext) -> None:
+    if not await orders_svc.fallback_username():      # زر قديم بعد إلغاء المعرّف الاحتياطي
+        await cb.answer(T.META_USERNAME_REQUIRED_ALERT, show_alert=True)
+        await _username_screen(cb)
+        return
     await state.update_data(tg_username=None, uname_skipped=True)
     await _show_summary(cb, state)
     await cb.answer()
@@ -546,7 +557,7 @@ def summary_text(spec: dict, price: Decimal, balance: Decimal) -> tuple[str, boo
         daily=fmt(spec["daily"]), days=P.days_word(spec["days"]), budget=fmt(budget), link=esc(spec.get("link")) or "—",
         desc=esc(spec.get("desc")) or "—", media=_media_word(spec.get("media_count", 0)),
         addons=addon_line, wa=spec.get("whatsapp") or "—",
-        tg=f"@{spec['tg_username']}" if spec.get("tg_username") else "بلا معرّف (واتساب فقط)",
+        tg=f"@{spec['tg_username']}" if spec.get("tg_username") else "بلا معرّف (يتواصل معك فريقنا)",
         price=fmt(price), balance=fmt(balance),
         balance_line=T.META_SUMMARY_OK if ok else T.META_SUMMARY_GAP.format(gap=fmt(gap)),
     )
@@ -627,6 +638,16 @@ async def cb_confirm(cb: CallbackQuery, state: FSMContext) -> None:
         await cb.answer(CP.maintenance_text(), show_alert=True)
         return
     spec = _spec_from_state(d)
+    if not spec.get("tg_username"):
+        # نور يشترط معرّف تيليغرام: معرّف العميل (ربما ضبطه للتو) أو المعرّف الاحتياطي — وإلا لا نخصم شيئاً
+        live = V.clean_username(cb.from_user.username)
+        if live:
+            await state.update_data(tg_username=live)
+            spec["tg_username"] = live
+        elif not await orders_svc.fallback_username():
+            await cb.answer(T.META_USERNAME_REQUIRED_ALERT, show_alert=True)
+            await _username_screen(cb)
+            return
     # منع الضغط المزدوج: نعطّل الأزرار فوراً
     try:
         await cb.message.edit_reply_markup(reply_markup=None)

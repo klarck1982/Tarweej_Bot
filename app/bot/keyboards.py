@@ -615,11 +615,11 @@ def meta_whatsapp_confirm(back: str = "meta:back:whatsapp") -> InlineKeyboardMar
     ] + _nav(None))
 
 
-def meta_username_missing() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [ib("✅ ضبطته — تحقق", "meta:uname_check", "success")],
-        [ib("⏭️ متابعة بدون معرّف", "meta:uname_skip")],
-    ] + _nav("meta:back:whatsapp"))
+def meta_username_missing(allow_skip: bool = True) -> InlineKeyboardMarkup:
+    rows = [[ib("✅ ضبطته — تحقق", "meta:uname_check", "success")]]
+    if allow_skip:
+        rows.append([ib("⏭️ متابعة بدون معرّف", "meta:uname_skip")])
+    return InlineKeyboardMarkup(inline_keyboard=rows + _nav("meta:back:whatsapp"))
 
 
 def meta_summary(price_ok: bool, price: str, gap: str | None = None) -> InlineKeyboardMarkup:
