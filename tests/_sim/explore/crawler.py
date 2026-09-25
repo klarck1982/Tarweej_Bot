@@ -48,6 +48,10 @@ VALID: dict[str, list] = {
     "AdminTopup:adjust_amount": ["20"], "AdminTopup:message_user": ["أرسل صورة أوضح"],
     "AdminTopup:wallet_address": ["TQ7mYkWn2cX8yR5vB3nH6jL1pD4sF9gA0e", "0x52908400098527886E0F7030069857D2E4169EE7", "123456789"],
     "AdminTopup:wallet_holder": ["رأفت أحمد"], "AdminTopup:syp_rate": ["13000"],
+    # 💼 سوق القنوات
+    "AdminMp:reason": ["سبب واضح من الأدمن"], "MpReg:ref": ["@damascus_deals"], "MpReg:p24": ["10"], "MpReg:p48": ["15"],
+    "MpReg:ppin": ["14"], "MpReg:blurb": ["عروض يومية"], "MpOrder:when": ["بعد 2 ساعة"], "MpPay:address": ["0933123456"],
+    "MpPay:amount": ["10"], "MpPay:cv_amount": ["5"],
 }
 
 FUZZ_TEXT = ["0", "-5", "abc", "٥٠", "1e309", "99999999999999999999", "5,5", "NaN", "inf",
@@ -59,7 +63,7 @@ PER_PREFIX_CAP = 6
 # حقول نص حر: قبول «0» أو «abc» فيها طبيعي
 # «٥٠» = 50 بأرقام عربية: قبوله صحيح (تطبيع مقصود) — لا يُحسب قبولاً خاطئاً
 VALID_EQUIV = {"٥٠"}
-FREE_TEXT = {"TgPost:when", "AdminOrder:refund_reason", "AdminOrder:message_user", "AdminOrder:tga_revision", "AdminOrder:tga_reject",
+FREE_TEXT = {"TgPost:when", "MpReg:blurb", "MpPay:address", "AdminMp:reason", "AdminOrder:refund_reason", "AdminOrder:message_user", "AdminOrder:tga_revision", "AdminOrder:tga_reject",
              "AdminOrder:tga_text", "AdminOrder:tgp_reject", "AdminOrder:tgp_text", "AdminDesign:reject",
              "AdminTools:ticket_reply", "AdminTools:broadcast_text", "AdminTopup:reject_reason", "AdminTopup:message_user",
              "AdminTopup:wallet_holder", "ClientTicket:message", "ClientTicket:reply", "Design:notes", "Design:revision",

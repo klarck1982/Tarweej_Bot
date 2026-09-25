@@ -110,6 +110,41 @@ async def _partner_posts(bot: Bot) -> None:
         log.warning("partner posts job failed: %s", e)
 
 
+async def _marketplace(bot: Bot) -> None:
+    """💼 سوق القنوات: مهلة القبول ← النشر في الموعد ← التحقق من بقاء المنشور ← الإنهاء والحذف ← تحرير الأرباح."""
+    from app.services import marketplace as MP, mp_notify as MN
+    steps = (
+        ("expire", MP.expire_requests, lambda o: MN.on_refunded(bot, o, "timeout")),
+        ("publish", lambda: MP.publish_due(bot), None),
+        ("verify", lambda: MP.verify_due(bot), lambda o: MN.on_refunded(bot, o, "early")),
+        ("finish", lambda: MP.finish_due(bot), lambda o: MN.on_completed(bot, o)),
+        ("release", MP.release_due, lambda o: MN.on_released(bot, o)),
+    )
+    for name, fetch, notify in steps:
+        try:
+            items = await fetch()
+            for item in items:
+                try:
+                    if name == "publish":
+                        res, o = item
+                        if res == "published":
+                            await MN.on_published(bot, o)
+                        elif res == "retry":
+                            await MN.on_publish_retry(bot, o)
+                        elif res == "refunded":
+                            await MN.on_refunded(bot, o, "publish")
+                    else:
+                        await notify(item)
+                except Exception as e:  # noqa: BLE001 — إشعار فاشل لا يوقف البقية
+                    log.warning("marketplace %s notify failed: %s", name, e)
+        except Exception as e:  # noqa: BLE001
+            log.warning("marketplace %s job failed: %s", name, e)
+    try:
+        await MP.refresh_subs(bot)
+    except Exception as e:  # noqa: BLE001
+        log.info("marketplace subs refresh failed: %s", e)
+
+
 def T_auto_done(o: dict) -> str:
     from app.bot import texts as T
     return T.ADMIN_TGP_AUTO_DONE.format(id=o["id"], title=ON.esc(o["spec"].get("channel_title")))
@@ -124,6 +159,7 @@ async def tick(bot: Bot) -> None:
     await _expire_drafts(bot)
     await _sync_open_orders(bot)
     await _partner_posts(bot)
+    await _marketplace(bot)
     await _design_tasks(bot)
     await _scheduled_designs(bot)
     await _tickets(bot)

@@ -18,7 +18,8 @@ from app.bot import checkout as CO
 from app.bot import keyboards as K
 from app.bot import texts as T
 from app.db.repo import events, orders as orders_repo, partner_channels as PC, settings as settings_repo, users as users_repo
-from app.services import cpanel as CP, orders as orders_svc, partner_posts as PP, pricing as P, validators as V
+from app.bot import mp_texts as TX
+from app.services import cpanel as CP, marketplace as MP, orders as orders_svc, partner_posts as PP, pricing as P, validators as V
 from app.services.money import InsufficientBalance
 from app.services.pricing import fmt, money
 
@@ -130,6 +131,11 @@ def channel_card_text(ch: dict) -> str:
     views = f" · 👁️ ~{PP.subs_label(ch['avg_views'])} مشاهدة للمنشور" if ch.get("avg_views") else ""
     blurb = f"<i>«{T.esc(ch['blurb'])}»</i>\n" if ch.get("blurb") else ""
     formats = " · ".join(f"{PP.fmt_label(code)}: <b>{fmt(price)}</b>" for code, price, _ in PP.formats_for(ch))
+    if MP.is_mp_channel(ch):
+        # 💼 قناة سوق: موثّقة من تيليغرام + نشر/حذف تلقائي + تقييم العملاء
+        r = MP.rating_label(ch)
+        done = f" · ✅ {ch['done_n']} منشوراً" if ch.get("done_n") else ""
+        blurb = TX.CARD_BADGES.format(rating=f" · {r}" if r else "", done=done) + blurb
     return T.TGP_CHANNEL_CARD.format(
         title=T.esc(ch["title"]), username=f"<code>@{ch['username']}</code>" if ch.get("username") else "",
         subs=PP.subs_label(ch["subscribers"]), views=views, cat=PC.cat_label(ch["category"]), blurb=blurb, formats=formats,
@@ -484,8 +490,9 @@ async def cb_confirm(cb: CallbackQuery, state: FSMContext) -> None:
         sent = await cb.message.answer(text, reply_markup=K.tgp_done(order["id"]))
     if sent:
         await orders_repo.set_messages(order["id"], user_msg_id=sent.message_id)
-    from app.services import order_notify
+    from app.services import order_notify, mp_notify
     await order_notify.notify_admins_new_order(cb.bot, order["id"])
+    await mp_notify.after_customer_paid(cb.bot, order["id"])   # 💼 قناة سوق ← طلب القبول لصاحبها
 
 
 # ───────────── استئناف مسودة (يستدعيه ord:resume) ─────────────
@@ -534,3 +541,6 @@ async def cb_cancel_yes(cb: CallbackQuery) -> None:
     from app.services import order_notify
     await order_notify.refresh_admin_cards(cb.bot, oid)
     await order_notify.notify_admins_text(cb.bot, f"🚫 <b>#ORD-{oid}</b>: العميل ألغى طلب النشر قبل الجدولة — استُرد {fmt(o['refunded_usd'])}.")
+    if o.get("owner_user_id") and o.get("owner_deadline"):
+        from app.services import mp_notify
+        await mp_notify.on_refunded(cb.bot, o, "cancel")

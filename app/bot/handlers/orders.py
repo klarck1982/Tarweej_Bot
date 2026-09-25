@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 from aiogram import F, Router
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
@@ -138,6 +140,26 @@ def tga_order_text(o: dict) -> str:
     )
 
 
+def _mp_hint(o: dict) -> str | None:
+    """💼 طلب في قناة سوق: تلميحات تعكس أن صاحب القناة يقبل والبوت ينشر ويراقب."""
+    if not o.get("owner_user_id"):
+        return None
+    from app.bot import mp_texts as TX
+    st = o["status"]
+    if st == "submitted":
+        if not o.get("owner_deadline"):
+            return TX.HINT_WAIT_TEXT
+        hours = max(1, int((o["owner_deadline"] - datetime.now(timezone.utc)).total_seconds() // 3600) + 1)
+        return TX.HINT_SUBMITTED.format(h=hours)
+    if st == "in_progress":
+        return TX.HINT_IN_PROGRESS
+    if st == "active":
+        return TX.HINT_ACTIVE
+    if st == "completed" and o.get("payout_status") == "held" and o.get("payout_at") and o["payout_at"] > datetime.now(timezone.utc):
+        return TX.HINT_COMPLETED_HELD.format(until=ON._when(o["payout_at"]))
+    return None
+
+
 def tgp_order_text(o: dict) -> str:
     from app.services import partner_posts as PP
     spec = o["spec"]
@@ -166,7 +188,7 @@ def tgp_order_text(o: dict) -> str:
         icon=orders_svc.status_icon(o), id=o["id"], status=orders_svc.status_name(o),
         title=ON.esc(spec.get("channel_title")), subs=PP.subs_label(spec.get("channel_subs")), format=PP.fmt_label(spec.get("format", "24h")),
         price=fmt(o["price_usd"]), content=content, when=when, url=url, created=ON._when(o.get("created_at")),
-        timeline=timeline, views=ON.tgp_views_line(o), hint=T.TGP_HINTS.get(o["status"], T.ORDER_HINTS.get(o["status"], "")),
+        timeline=timeline, views=ON.tgp_views_line(o), hint=_mp_hint(o) or T.TGP_HINTS.get(o["status"], T.ORDER_HINTS.get(o["status"], "")),
     )
 
 

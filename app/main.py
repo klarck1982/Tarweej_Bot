@@ -23,8 +23,9 @@ from aiohttp import web
 from app import STEP, VERSION
 from app.bot import texts as T
 from app.bot.fsm_storage import PostgresStorage
-from app.bot.handlers import design_wizard, fallback, menu, meta_wizard, orders, scheduled, start, tg_ads_wizard, tg_post_wizard, tickets, topup
+from app.bot.handlers import design_wizard, fallback, menu, meta_wizard, orders, partner, scheduled, start, tg_ads_wizard, tg_post_wizard, tickets, topup
 from app.bot.wide import WideButtonsMiddleware
+from app.bot.handlers.admin import marketplace as admin_marketplace
 from app.bot.handlers.admin import panel as admin_panel
 from app.bot.handlers.admin import orders as admin_orders
 from app.bot.handlers.admin import scheduled as admin_scheduled
@@ -56,8 +57,10 @@ def build_dispatcher() -> Dispatcher:
     dp.include_router(admin_orders.router)
     dp.include_router(admin_scheduled.router)  # محتوى الاشتراكات المجدولة
     dp.include_router(admin_tools.router)  # v0.8.1: تذاكر + بث + بحث/رصيد (قبل لوحة soon)
+    dp.include_router(admin_marketplace.router)  # v1.0: 💼 سوق القنوات (adm:mp:*) — قبل لوحة soon
     dp.include_router(admin_panel.router)
     dp.include_router(start.router)
+    dp.include_router(partner.router)        # v1.0: 💼 mp:* و mpc:* + إضافة/إزالة البوت من القنوات
     dp.include_router(meta_wizard.router)   # قبل menu: يلتقط meta:* و ord:resume
     dp.include_router(tg_ads_wizard.router) # tga:*
     dp.include_router(tg_post_wizard.router)  # tgp:*
@@ -77,6 +80,7 @@ async def set_commands(bot: Bot) -> None:
         BotCommand(command="balance", description="رصيدي"),
         BotCommand(command="orders", description="طلباتي"),
         BotCommand(command="help", description="الدعم"),
+        BotCommand(command="partner", description="💼 اربح من قناتك"),
         BotCommand(command="cancel", description="إلغاء العملية الحالية"),
     ]
     await bot.set_my_commands(user_cmds, scope=BotCommandScopeDefault())

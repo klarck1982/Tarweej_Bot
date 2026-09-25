@@ -483,6 +483,10 @@ async def msg_tgp_reject(message: Message, state: FSMContext) -> None:
     await message.answer(f"❌ #ORD-{o['id']} — استُرد {fmt(o['refunded_usd'])} للعميل وأُبلغ.")
     await ON.push_user_status(message.bot, o, reason=reason)
     await ON.refresh_admin_cards(message.bot, o["id"])
+    if o.get("owner_user_id") and o.get("owner_deadline"):
+        from app.bot import mp_texts as TX
+        from app.services import mp_notify
+        await mp_notify.owner_note(message.bot, o, TX.NOTE_ADMIN_REJECT.format(id=o["id"], reason=T.esc(reason)))
 
 
 @router.callback_query(F.data.regexp(r"^adm:tgp:(\d+):text$"))
@@ -517,6 +521,8 @@ async def msg_tgp_text(message: Message, state: FSMContext) -> None:
     except Exception:  # noqa: BLE001
         pass
     await ON.refresh_admin_cards(message.bot, o["id"])
+    from app.services import mp_notify
+    await mp_notify.after_customer_paid(message.bot, o["id"])   # 💼 قناة سوق: النص جاهز ← طلب القبول لصاحبها
 
 
 # ═══════════════════════════ 🎨 مهام التصميم (v0.8.0) ═══════════════════════════
@@ -704,3 +710,7 @@ async def msg_ds_reject(message: Message, state: FSMContext) -> None:
     await message.answer(f"❌ #ORD-{o['id']} — استُرد {fmt(o['refunded_usd'])} للعميل وأُبلغ.")
     await ON.push_user_status(message.bot, o, reason=reason)
     await ON.refresh_admin_cards(message.bot, o["id"])
+    if o.get("owner_user_id") and o.get("owner_deadline"):
+        from app.bot import mp_texts as TX
+        from app.services import mp_notify
+        await mp_notify.owner_note(message.bot, o, TX.NOTE_ADMIN_REJECT.format(id=o["id"], reason=T.esc(reason)))

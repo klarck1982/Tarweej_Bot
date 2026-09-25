@@ -69,7 +69,7 @@ def main_menu(is_admin: bool = False, balance: str = "0$", attention: int = 0,
         rows.append(pair)
     rows += [
         [ib(f"{T.BTN_BALANCE} · {balance}", "bal:menu"), ib(T.BTN_TOPUP, "bal:topup", "success")],
-        [ib(T.BTN_ORDERS, "nav:orders")],
+        [ib(T.BTN_ORDERS, "nav:orders"), ib("💼 اربح من قناتك", "mp:home")],
         [ib(T.BTN_SUPPORT, "sup:menu"), ib(T.BTN_INFO, "info:menu")],
     ]
     if CP.rt("updates_channel"):
@@ -357,6 +357,7 @@ def admin_panel(topups: int = 0, tasks: int = 0, tickets: int = 0, orders: int =
             "primary" if attention else None)],
         [ib(f"🛠️ مهام يدوية{n(tasks)}" + (f" · 🔴 {late}" if late else ""), "adm:tasks", "danger" if late else ("primary" if tasks else None))],
         [ib(f"🎫 تذاكر{n(tickets)}", "adm:tickets", "primary" if tickets else None)],
+        [ib("💼 سوق القنوات", "adm:mp")],
         [ib("📊 إحصائيات", "adm:stats")],
         [ib("📣 بث رسالة", "adm:bc")],
         [ib("⚙️ إعدادات سريعة", "adm:settings")],
@@ -947,6 +948,11 @@ def tgp_done(order_id: int) -> InlineKeyboardMarkup:
     ])
 
 
+def _future(dt) -> bool:
+    from datetime import datetime, timezone
+    return bool(dt) and dt > datetime.now(timezone.utc)
+
+
 def tgp_order_view(order: dict) -> InlineKeyboardMarkup:
     """بطاقة طلب النشر عند العميل — تختلف عن order_view بزر فتح المنشور والإلغاء المجاني."""
     st = order["status"]
@@ -959,6 +965,10 @@ def tgp_order_view(order: dict) -> InlineKeyboardMarkup:
         rows.append([url_btn("🔗 فتح المنشور ↗", order["post_url"])])
     if st == "submitted":
         rows.append([ib("🚫 إلغاء واسترداد (مجاني قبل الجدولة)", f"tgp:cancel_order:{oid}", "danger")])
+    if st == "completed" and not order.get("rating"):
+        rows.append([ib("⭐ قيّم القناة", f"mpc:rateask:{oid}")])
+    if st == "completed" and order.get("payout_status") == "held" and _future(order.get("payout_at")):
+        rows.append([ib("⚠️ بلاغ: المنشور لم يُنفَّذ كما يجب", f"mpc:dsp:{oid}", "danger")])
     if st in ("completed", "rejected", "cancelled", "refunded"):
         rows.append([ib("🔁 كرّر في قناة أخرى", "tgp:start", "primary")])
     if order.get("media_count"):

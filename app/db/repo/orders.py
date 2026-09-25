@@ -24,6 +24,7 @@ from app.services.pricing import money
 
 OPEN_STATUSES = ("paid", "submitted", "in_progress", "active", "paused", "needs_revision", "delivered")
 FINAL_STATUSES = ("completed", "rejected", "failed_submit", "refunded", "cancelled")
+JSON_COLS = ("nour_payload", "nour_response", "spec", "results", "delivery", "channel_msg_ids")
 KINDS = ("meta_campaign", "tg_ads", "tg_post", "copy", "design", "reel", "montage", "bundle")
 
 
@@ -41,9 +42,9 @@ def row_to_dict(row) -> dict | None:
     if row is None:
         return None
     d = dict(row)
-    for k in ("spec", "nour_payload", "nour_response", "admin_msg_ids", "results", "delivery"):
+    for k in ("spec", "nour_payload", "nour_response", "admin_msg_ids", "results", "delivery", "channel_msg_ids"):
         if k in d:
-            d[k] = _j(d[k]) or ({} if k not in ("admin_msg_ids", "delivery") else [])
+            d[k] = _j(d[k]) or ({} if k not in ("admin_msg_ids", "delivery", "channel_msg_ids") else [])
     return d
 
 
@@ -94,7 +95,8 @@ async def count_attention(dry_run: bool) -> int:
     meta = int(await db.fetchval("SELECT count(*) FROM orders WHERE kind = 'meta_campaign' AND status = ANY($1::text[])", statuses) or 0)
     manual = int(await db.fetchval(
         "SELECT count(*) FROM orders WHERE kind <> 'meta_campaign' AND status IN ('paid','submitted','in_progress','active') "
-        "AND NOT (kind = 'design' AND status = 'in_progress')") or 0)
+        "AND NOT (kind = 'design' AND status = 'in_progress') "
+        "AND NOT (kind = 'tg_post' AND owner_user_id IS NOT NULL AND spec->>'text' IS NOT NULL)") or 0)
     design_rev = int(await db.fetchval("SELECT count(*) FROM orders WHERE kind = 'design' AND status = 'needs_revision'") or 0)
     return meta + manual + design_rev
 
@@ -104,7 +106,8 @@ async def list_tasks(limit: int = 30) -> list[dict]:
     rows = await db.fetch(
         "SELECT o.*, u.name AS user_name, u.username AS user_username FROM orders o JOIN users u ON u.tg_id = o.user_id "
         "WHERE (o.kind = 'design' AND o.status IN ('submitted','in_progress','needs_revision')) "
-        "   OR (o.kind = 'tg_post' AND o.status IN ('submitted','in_progress')) "
+        "   OR (o.kind = 'tg_post' AND o.status IN ('submitted','in_progress') "
+        "       AND NOT (o.owner_user_id IS NOT NULL AND o.spec->>'text' IS NOT NULL)) "
         "   OR (o.kind = 'tg_ads' AND o.status IN ('submitted','in_progress')) "
         "ORDER BY COALESCE(o.due_at, o.scheduled_at, o.paid_at + interval '24 hours', o.created_at) NULLS LAST, o.id LIMIT $1", limit)
     return [row_to_dict(r) for r in rows]
@@ -174,7 +177,7 @@ async def update(order_id: int, **fields) -> dict | None:
         return await get(order_id)
     sets, args = [], [order_id]
     for k, v in fields.items():
-        is_json = k in ("nour_payload", "nour_response", "spec", "results", "delivery")
+        is_json = k in JSON_COLS
         args.append(json.dumps(v, ensure_ascii=False, default=str) if is_json else v)
         cast = "::jsonb" if is_json else ""
         sets.append(f"{k} = ${len(args)}{cast}")
@@ -191,7 +194,7 @@ async def transition(order_id: int, from_statuses, **fields) -> dict | None:
         from_statuses = (from_statuses,)
     sets, args = [], [order_id, list(from_statuses)]
     for k, v in fields.items():
-        is_json = k in ("nour_payload", "nour_response", "spec", "results", "delivery")
+        is_json = k in JSON_COLS
         args.append(json.dumps(v, ensure_ascii=False, default=str) if is_json else v)
         cast = "::jsonb" if is_json else ""
         sets.append(f"{k} = ${len(args)}{cast}")

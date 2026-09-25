@@ -233,6 +233,10 @@ async def finish(order_id: int, admin_id: int | None, views: int | None = None) 
     if not upd:
         return None
     await events.log_event("order_status", o["user_id"], order_id, from_="active", to="completed", admin_id=admin_id, auto=admin_id is None)
+    if upd.get("owner_user_id"):
+        # 💼 قناة سوق: ربح صاحب القناة يُحجز الآن ويتحرر بعد فترة البلاغات (مرة واحدة فقط لكل طلب)
+        from app.services import marketplace as MP
+        await MP.on_completed(upd)
     return upd
 
 
@@ -268,7 +272,8 @@ async def cancel_by_user(order_id: int, user_id: int) -> dict | None:
 
 async def finish_due(limit: int = 20) -> list[dict]:
     rows = await db.fetch(
-        "SELECT id FROM orders WHERE kind = 'tg_post' AND status = 'active' AND ends_at IS NOT NULL AND ends_at <= now() ORDER BY ends_at LIMIT $1", limit)
+        "SELECT id FROM orders WHERE kind = 'tg_post' AND status = 'active' AND ends_at IS NOT NULL AND ends_at <= now() "
+        "AND owner_user_id IS NULL ORDER BY ends_at LIMIT $1", limit)   # طلبات السوق: marketplace.finish_due (مع حذف المنشور)
     out = []
     for r in rows:
         upd = await finish(int(r["id"]), None)
@@ -281,7 +286,7 @@ async def reminders_due(minutes_before: int = 60, limit: int = 20) -> list[dict]
     """طلبات مجدولة يبدأ موعدها خلال `minutes_before` دقيقة ولم يُذكَّر بها بعد."""
     rows = await db.fetch(
         "UPDATE orders SET reminded_at = now() WHERE id IN ("
-        "  SELECT id FROM orders WHERE kind = 'tg_post' AND status = 'in_progress' AND reminded_at IS NULL "
+        "  SELECT id FROM orders WHERE kind = 'tg_post' AND status = 'in_progress' AND reminded_at IS NULL AND owner_user_id IS NULL "
         "  AND scheduled_at IS NOT NULL AND scheduled_at <= now() + ($1 || ' minutes')::interval ORDER BY scheduled_at LIMIT $2"
         ") RETURNING id", str(minutes_before), limit)
     out = []

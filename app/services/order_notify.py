@@ -120,7 +120,7 @@ async def admin_tgp_card_text(order: dict, media_count: int) -> str:
         if order.get("ends_at"):
             posted += f" · ينتهي {_tgp_ends(order)}"
     note = f"\n📌 <i>{esc(order['note'])}</i>" if order.get("note") else ""
-    return T.ADMIN_TGP_CARD.format(
+    text = T.ADMIN_TGP_CARD.format(
         icon=orders_svc.status_icon(order), id=order["id"], status=orders_svc.status_name(order),
         name=esc(order.get("user_name")), username=esc(uname), uid=order["user_id"],
         title=esc(spec.get("channel_title")), url=esc(spec.get("channel_url")), owner=esc(owner or "—"),
@@ -129,6 +129,11 @@ async def admin_tgp_card_text(order: dict, media_count: int) -> str:
         content=content, text=text, addons=addons, price=fmt(order["price_usd"]), cost=fmt(order["cost_usd"]), margin=fmt(margin),
         views=tgp_views_line(order), created=_when(order.get("paid_at") or order.get("created_at")), note=note,
     )
+    if order.get("owner_user_id"):
+        # 💼 قناة سوق: صاحبها يقبل والبوت ينشر/يتحقق/يحذف — الأدمن يتدخل عند الحاجة فقط
+        dl = f" · مهلة الرد {_when(order['owner_deadline'])}" if order.get("owner_deadline") and order["status"] == "submitted" else ""
+        text += f"\n💼 <b>قناة سوق</b>: يديرها صاحبها تلقائياً{dl}"
+    return text
 
 
 async def admin_scheduled_card_text(order: dict) -> str:
