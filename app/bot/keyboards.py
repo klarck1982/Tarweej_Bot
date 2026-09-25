@@ -68,8 +68,8 @@ def main_menu(is_admin: bool = False, balance: str = "0$", attention: int = 0,
     if pair:
         rows.append(pair)
     rows += [
-        [ib(f"{T.BTN_BALANCE} · {balance}", "bal:menu"), ib(T.BTN_TOPUP, "bal:topup", "success")],
-        [ib(T.BTN_ORDERS, "nav:orders"), ib("💼 اربح من قناتك", "mp:home")],
+        [ib(T.BTN_TOPUP, "bal:topup", "success"), ib("💼 اربح من قناتك", "mp:home", "success")],
+        [ib(T.BTN_ORDERS, "nav:orders"), ib(f"{T.BTN_BALANCE} · {balance}", "bal:menu", "primary")],
         [ib(T.BTN_SUPPORT, "sup:menu"), ib(T.BTN_INFO, "info:menu")],
     ]
     if CP.rt("updates_channel"):
