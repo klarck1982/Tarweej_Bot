@@ -91,6 +91,18 @@ def _tgp_ends(order: dict) -> str:
     return _when(order.get("ends_at"))
 
 
+def _mp_status(order: dict) -> str | None:
+    """💼 طلب سوق: حالة تصف من ينتظر ماذا — لا «بانتظار تأكيد الموعد» التي توحي بأن على الأدمن فعل شيء."""
+    if not order.get("owner_user_id"):
+        return None
+    st = order["status"]
+    if st == "submitted":
+        return "جديد — بانتظار رد صاحب القناة" if order.get("owner_deadline") else "جديد — بانتظار نص الفريق ✍️"
+    if st == "in_progress":
+        return "مقبول — ينشره البوت في موعده"
+    return None
+
+
 async def admin_tgp_card_text(order: dict, media_count: int) -> str:
     from app.services import partner_posts as PP
     spec = order["spec"]
@@ -111,6 +123,8 @@ async def admin_tgp_card_text(order: dict, media_count: int) -> str:
         from app.db.repo import partner_channels as PC
         ch = await PC.get(int(spec.get("channel_id") or 0))
         owner = (ch or {}).get("owner_contact") or None
+        if order.get("owner_user_id"):
+            owner = f"صاحب القناة (سوق) — {order['owner_user_id']}"
     except Exception:  # noqa: BLE001
         owner = None
     when_ok = f"\n📅 <b>الموعد المؤكَّد: {_when(order['scheduled_at'])}</b>" if order.get("scheduled_at") else ""
@@ -121,7 +135,7 @@ async def admin_tgp_card_text(order: dict, media_count: int) -> str:
             posted += f" · ينتهي {_tgp_ends(order)}"
     note = f"\n📌 <i>{esc(order['note'])}</i>" if order.get("note") else ""
     text = T.ADMIN_TGP_CARD.format(
-        icon=orders_svc.status_icon(order), id=order["id"], status=orders_svc.status_name(order),
+        icon=orders_svc.status_icon(order), id=order["id"], status=_mp_status(order) or orders_svc.status_name(order),
         name=esc(order.get("user_name")), username=esc(uname), uid=order["user_id"],
         title=esc(spec.get("channel_title")), url=esc(spec.get("channel_url")), owner=esc(owner or "—"),
         format=PP.fmt_label(spec.get("format", "24h")),

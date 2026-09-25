@@ -358,6 +358,12 @@ async def _tgp_order(cb: CallbackQuery, oid: int, statuses: tuple[str, ...]) -> 
     if not o or o.get("kind") != "tg_post":
         await cb.answer()
         return None
+    if o.get("owner_user_id") and cb.data.rsplit(":", 1)[-1] in ("when", "url", "views", "finish"):
+        # 💼 طلب سوق: الجدولة/الرابط/الإنهاء تلقائية — زر قديم من بطاقة سابقة
+        from app.bot import mp_texts as TX
+        await cb.answer(TX.MP_ORDER_ADMIN_ONLY, show_alert=True)
+        await ON.refresh_admin_cards(cb.bot, oid)
+        return None
     if o["status"] not in statuses:
         await cb.answer("هذا الإجراء غير متاح من الحالة الحالية", show_alert=True)
         await ON.refresh_admin_cards(cb.bot, oid)
@@ -480,6 +486,11 @@ async def msg_tgp_reject(message: Message, state: FSMContext) -> None:
     if not o:
         await message.answer("لم يُنفَّذ — الطلب تغيّرت حالته.")
         return
+    if o.get("owner_user_id") and o.get("channel_msg_ids") and o.get("channel_chat_id") and not o.get("unpublished_at"):
+        from app.services import marketplace as MP
+        ids = o["channel_msg_ids"]
+        await MP._delete_post(message.bot, int(o["channel_chat_id"]), ids, bool((o.get("results") or {}).get("pinned")))
+        await repo.transition(o["id"], (o["status"],), unpublished_at=MP.now())
     await message.answer(f"❌ #ORD-{o['id']} — استُرد {fmt(o['refunded_usd'])} للعميل وأُبلغ.")
     await ON.push_user_status(message.bot, o, reason=reason)
     await ON.refresh_admin_cards(message.bot, o["id"])

@@ -7,6 +7,7 @@ from __future__ import annotations
 from aiogram import F, Router
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import Command
+from aiogram.filters import StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, ChatMemberUpdated, Message
 
@@ -293,7 +294,7 @@ async def cb_channel_ignore(cb: CallbackQuery) -> None:
     await cb.answer()
 
 
-@router.message(F.chat.type == "private", F.forward_origin)
+@router.message(F.chat.type == "private", F.forward_origin, StateFilter(None))
 async def on_forward_from_channel(message: Message, state: FSMContext) -> None:
     """احتياط: الأدمن يعيد توجيه أي رسالة من القناة إلى البوت → نعرض الربط (إن فاتته رسالة الاكتشاف)."""
     origin = message.forward_origin
@@ -308,8 +309,12 @@ async def on_forward_from_channel(message: Message, state: FSMContext) -> None:
 
 
 @router.my_chat_member()
-async def on_my_chat_member(ev: ChatMemberUpdated) -> None:
-    """الأدمن أضاف البوت إلى قناة/مجموعة (أو أزاله) — نعرض عليه ربطها فوراً في خاصّه."""
+async def on_my_chat_member(ev: ChatMemberUpdated, fsm_storage=None) -> None:
+    """الأدمن أضاف البوت إلى قناة/مجموعة (أو أزاله) — نعرض عليه ربطها فوراً في خاصّه.
+
+    v0.10.1: الأدمن قد يكون صاحب قناة يريد عرضها في 💼 السوق. هذا الراوتر يلتقط الحدث قبل راوتر السوق، لذا:
+    · قناة مسجّلة في السوق، أو الأدمن في خطوة «سجّل قناتي» ← نمرّر الحدث لمعالج السوق مباشرة.
+    · غير ذلك ← رسالة واحدة فيها كل الخيارات: 💼 اعرضها في السوق · ربطها إيداعات/طلبات/تنبيهات · تجاهل."""
     chat = ev.chat
     if chat.type not in ("channel", "supergroup", "group"):
         return
@@ -317,14 +322,32 @@ async def on_my_chat_member(ev: ChatMemberUpdated) -> None:
     old = ev.old_chat_member.status
     admin_id = ev.from_user.id
     ok_states = ("administrator", "creator") + (("member",) if chat.type != "channel" else ())
-    if new in ok_states and old not in ok_states:
+    added = new in ok_states and old not in ok_states
+    removed = new not in ok_states and old in ok_states
+    if chat.type == "channel" and (added or removed):
+        from app.bot.handlers import partner
+        from app.services import marketplace as MP
+        mp_ch = await MP.channel_by_chat(chat.id)
+        registering = False
+        if added and fsm_storage is not None:
+            from aiogram.fsm.storage.base import StorageKey
+            st = await fsm_storage.get_state(StorageKey(bot_id=ev.bot.id, chat_id=admin_id, user_id=admin_id))
+            registering = bool(st and st.startswith("MpReg"))
+        if mp_ch and mp_ch.get("owner_user_id"):
+            await partner.handle_member_event(ev)
+            if added:
+                return      # قناة سوق — لا نعرض ربطها كقناة إدارة
+        elif added and registering:
+            await partner.handle_member_event(ev)
+            return
+    if added:
         taken = await CH.all_cfg()
         try:
             await ev.bot.send_message(admin_id, T.ADMIN_CHANNEL_DETECTED.format(title=T.esc(chat.title or str(chat.id)), id=chat.id),
-                                      reply_markup=K.admin_channel_bind(chat.id, taken))
+                                      reply_markup=K.admin_channel_bind(chat.id, taken, mp=chat.type == "channel"))
         except Exception as e:  # noqa: BLE001 — الأدمن لم يفتح خاصّ البوت بعد
             log.info("cannot offer channel bind to %s: %s", admin_id, e)
-    elif new not in ok_states and old in ok_states:
+    elif removed:
         kinds = await CH.kinds_using(chat.id)
         for k in kinds:
             await CH.unset(k)

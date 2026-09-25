@@ -420,10 +420,10 @@ def admin_channel_info(kind: str) -> InlineKeyboardMarkup:
     ])
 
 
-def admin_channel_bind(chat_id: int, taken: dict) -> InlineKeyboardMarkup:
-    """يظهر في خاصّ الأدمن فور إضافة البوت إلى قناة: لأي غرض تُستخدم؟"""
+def admin_channel_bind(chat_id: int, taken: dict, mp: bool = False) -> InlineKeyboardMarkup:
+    """يظهر في خاصّ الأدمن فور إضافة البوت إلى قناة: لأي غرض تُستخدم؟ (mp=True: قناة ← خيار 💼 السوق أولاً)"""
     from app.services import channels as CH
-    rows = []
+    rows = [[ib("💼 اعرضها في سوق القنوات (اربح منها)", f"mp:reg:{chat_id}", "success")]] if mp else []
     for kind in CH.KINDS:
         cur = taken.get(kind)
         suffix = f" (حالياً: {cur['title'][:16]})" if cur and cur.get("id") else ""
@@ -991,18 +991,21 @@ def admin_tgp_card(order: dict, media_count: int = 0, in_channel: bool = False) 
     rows = []
     if st in ("submitted", "in_progress") and "copy" in (spec.get("addons") or []) and not spec.get("text"):
         rows.append([ib("✍️ أدخل النص الذي كتبته", f"adm:tgp:{oid}:text", "success")])
-    if st in ("submitted", "in_progress"):
+    mp = bool(order.get("owner_user_id"))   # 💼 قناة سوق: صاحبها يقبل والبوت ينشر/يحذف — لا أزرار يدوية
+    if st in ("submitted", "in_progress") and not mp:
         rows.append([ib("📅 تأكيد الموعد ✍️" if st == "submitted" else "📅 تغيير الموعد ✍️", f"adm:tgp:{oid}:when", "primary")])
         rows.append([ib("🔗 تم النشر — ألصق الرابط ✍️", f"adm:tgp:{oid}:url", "success")])
-    if st == "active":
+    if mp and st == "active" and order.get("post_url"):
+        rows.append([url_btn("🔗 فتح المنشور ↗", order["post_url"])])
+    if st == "active" and not mp:
         rows.append([ib("👁️ إدخال المشاهدات ✍️", f"adm:tgp:{oid}:views"), ib("✅ إنهاء الآن", f"adm:tgp:{oid}:finish", "success")])
-    if st == "completed":
+    if st == "completed" and not mp:
         rows.append([ib("👁️ تعديل المشاهدات ✍️", f"adm:tgp:{oid}:views")])
     if media_count:
         rows.append([ib(f"📎 ملفات العميل ({media_count})", f"adm:ord:{oid}:media")])
     rows.append([ib("💬 مراسلة العميل", f"adm:ord:{oid}:msg")])
     if st in ("submitted", "in_progress", "active"):
-        rows.append([ib("❌ تعذّر النشر — استرداد كامل", f"adm:tgp:{oid}:reject", "danger")])
+        rows.append([ib("❌ إلغاء واسترداد كامل للعميل" if mp else "❌ تعذّر النشر — استرداد كامل", f"adm:tgp:{oid}:reject", "danger")])
     if not in_channel:
         rows.append([ib("◀️ الطلبات", "adm:orders")])
     return InlineKeyboardMarkup(inline_keyboard=rows)

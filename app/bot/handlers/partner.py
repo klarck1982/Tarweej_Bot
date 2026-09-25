@@ -164,7 +164,30 @@ async def msg_ref(message: Message, state: FSMContext) -> None:
 
 @router.my_chat_member(F.chat.type == "channel")
 async def on_my_chat_member(ev: ChatMemberUpdated) -> None:
-    """صاحب قناة أضاف البوت مشرفاً ← تحقق وبدء التسجيل في خاصّه. أُزيل البوت ← إيقاف القناة واسترداد الجاري."""
+    await handle_member_event(ev)
+
+
+@router.callback_query(F.data.regexp(r"^mp:reg:(-?\d+)$"))
+async def cb_reg_from_detect(cb: CallbackQuery, state: FSMContext) -> None:
+    """الأدمن أضاف البوت لقناة واختار «💼 اعرضها في سوق القنوات» من رسالة الاكتشاف."""
+    chat_id = int(cb.data.rsplit(":", 1)[1])
+    try:
+        info = await MP.verify_channel(cb.bot, chat_id, cb.from_user.id)
+    except MPError as e:
+        await cb.answer(str(e)[:190], show_alert=True)
+        return
+    await state.clear()
+    await cb.answer()
+    try:
+        await cb.message.delete()
+    except Exception:  # noqa: BLE001
+        pass
+    await _after_verify(cb.bot, cb.from_user.id, info)
+
+
+async def handle_member_event(ev: ChatMemberUpdated) -> None:
+    """صاحب قناة أضاف البوت مشرفاً ← تحقق وبدء التسجيل في خاصّه. أُزيل البوت ← إيقاف القناة واسترداد الجاري.
+    يُستدعى أيضاً من معالج الأدمن (panel) لأن راوتر الأدمن يلتقط أحداث القنوات أولاً."""
     new, old = ev.new_chat_member.status, ev.old_chat_member.status
     uid = ev.from_user.id
     if new == "administrator" and old != "administrator":
@@ -535,7 +558,8 @@ async def _do_accept(target: Message, bot, owner_id: int, oid: int, when: dateti
         await target.answer(f"⚠️ {esc(str(e))}")
         return
     hours = int((o["spec"] or {}).get("hours") or 24)
-    await target.answer(TX.ACCEPTED.format(id=oid, when="الآن" if now_ else MN.when(when), hours=hours), reply_markup=KB.order(o))
+    await target.answer(TX.ACCEPTED.format(id=oid, when="الآن" if now_ else MN.when(when), hours=hours),
+                        reply_markup=None if now_ else KB.order(o))
     if now_:
         await _publish_now(bot, oid)
     else:

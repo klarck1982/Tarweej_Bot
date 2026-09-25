@@ -43,6 +43,7 @@ D = Decimal
 BOT_ID = 123456
 OWNER, OWNER2, STRANGER = 700, 701, 702
 CH_MAIN, CH_PRIV, CH_GROUP, CH_B = -1002000000001, -1002000000002, -1002000000003, -1002000000004
+CH_ADM1, CH_ADM2, CH_ADM3, CH_ADM4 = -1002000000011, -1002000000012, -1002000000013, -1002000000014
 _cmid = itertools.count(5000)
 _upd = itertools.count(900_000)
 STEP = {"n": 0}
@@ -69,6 +70,10 @@ FAKE = {
            "members": {OWNER2: "creator", OWNER: "administrator"}, "bot": {"post": True, "delete": True, "edit": False},
            "msgs": {}, "pinned": set()},
 }
+for _cid, _un, _t in ((CH_ADM1, "admin_shop", "متجر الأدمن"), (CH_ADM2, "admin_news", "أخبار الأدمن"),
+                      (CH_ADM3, None, "تنبيهات خاصة"), (CH_ADM4, "admin_fwd", "قناة إعادة توجيه")):
+    FAKE[_cid] = {"type": "channel", "username": _un, "title": _t, "count": 3000, "members": {A: "creator"},  # noqa: F405
+                  "bot": None, "msgs": {}, "pinned": set()}
 BY_NAME = {v["username"].lower(): k for k, v in FAKE.items() if v["username"]}
 
 
@@ -256,7 +261,8 @@ async def invariants(tag):
     for r in await db.fetch("SELECT channel_msg_ids FROM orders WHERE status = 'active' AND channel_msg_ids IS NOT NULL"):
         ids = r["channel_msg_ids"]
         live_ids |= set(json.loads(ids) if isinstance(ids, str) else ids)
-    orphans = {cid: [m for m in ch["msgs"] if m not in live_ids] for cid, ch in FAKE.items()}
+    mp_chats = {r["chat_id"] for r in await db.fetch("SELECT chat_id FROM partner_channels WHERE chat_id IS NOT NULL")}
+    orphans = {cid: [m for m in ch["msgs"] if m not in live_ids] for cid, ch in FAKE.items() if cid in mp_chats}
     orphans = {k: v for k, v in orphans.items() if v}
     expect(not orphans, "high", "orphan-post", f"[{tag}] منشورات باقية في القنوات بلا طلب فعّال: {orphans}")
 
@@ -779,6 +785,82 @@ async def main():
     await drive(ow, [f"cb:mp:o:{oid_s}:rej", f"cb:mp:o:{oid_s}:r:time"])
     # تصفح شاشات صاحب القناة كلها
     await drive(ow, ["cb:mp:home", "cb:mp:orders", "cb:mp:earn", "cb:mp:hist", "cb:mp:how", f"cb:mp:ch:{cid}", f"cb:mp:resync:{cid}"])
+
+    # ═══ U تجربة الاستخدام (من قراءة القصة) ═══
+    section("U) تجربة الاستخدام: تأكيد العميل · بطاقة الأدمن · استرداد منشور حي · القبول الفوري")
+    oid_u, out = await buy(u, cid)
+    t = texts_to(out, U)  # noqa: F405
+    expect("أرسلنا طلبك لصاحب قناة" in t and "بالمشاهدات" not in t, "high", "mp-confirm-text", f"تأكيد العميل لقناة سوق: {t[:160]}")
+    card_btns = [b.get("callback_data") or "" for n, d in out if str(d.get("chat_id")) == str(A) for b in _kb_buttons(d.get("reply_markup"))]  # noqa: F405
+    manual = [c for c in card_btns if c.startswith(f"adm:tgp:{oid_u}:") and c.rsplit(":", 1)[1] in ("when", "url", "views", "finish")]
+    expect(not manual, "high", "mp-admin-manual", f"بطاقة الأدمن لطلب سوق فيها أزرار يدوية: {manual}")
+    out = await ow.click(f"mp:o:{oid_u}:t:now")
+    acc_btns = [b.get("callback_data") or "" for n, d in out if str(d.get("chat_id")) == str(OWNER) and "قبلت" in (d.get("text") or "")
+                for b in _kb_buttons(d.get("reply_markup"))]
+    expect(not any(c.endswith(":now") for c in acc_btns), "medium", "accept-now-stale", f"أزرار «انشر الآن» بعد النشر الفوري: {acc_btns}")
+    held0 = (await MP.earnings(OWNER))["held"]
+    out = await a.click(f"adm:tgp:{oid_u}:finish", expect_ok=False)   # زر قديم
+    o = await order_row(oid_u)
+    expect(o["status"] == "active" and (await MP.earnings(OWNER))["held"] == held0 and "تلقائياً" in alerts(out), "critical",  # noqa: F405
+           "mp-admin-finish", f"الأدمن أنهى طلب سوق يدوياً: {o['status']}")
+    for act in ("when", "url", "views"):
+        await a.click(f"adm:tgp:{oid_u}:{act}", expect_ok=False)
+        expect(await a.state() is None, "high", "mp-admin-input", f"زر {act} اليدوي فتح إدخالاً لطلب سوق")
+    b1 = await bal(U)  # noqa: F405
+    await drive(a, [f"cb:adm:tgp:{oid_u}:reject", "t:محتوى مخالف بعد النشر"])
+    o = await order_row(oid_u)
+    on_ch = [m for m in FAKE[CH_MAIN]["msgs"] if m in (o["channel_msg_ids"] or [])]
+    expect(o["status"] == "rejected" and not on_ch and await bal(U) == b1 + o["price_usd"], "critical", "mp-admin-refund-live",  # noqa: F405
+           f"استرداد الأدمن لمنشور حي: {o['status']} باقٍ في القناة={on_ch}")
+    await invariants("U")
+
+    # ═══ T الأدمن صاحب قناة (بلاغ المستخدم الحقيقي) ═══
+    section("T) الأدمن نفسه صاحب قناة: الإضافة تعرض السوق + الربط الإداري معاً")
+    await drive(a, ["cb:nav:home"])
+    out = await chat_member_update(env, CH_ADM1, A, False, True)  # noqa: F405
+    t = texts_to(out, A)  # noqa: F405
+    mp_btn = find_btn(out, A, f"mp:reg:{CH_ADM1}")  # noqa: F405
+    bind_btn = find_btn(out, A, "adm:ch:bind:")  # noqa: F405
+    expect(mp_btn and bind_btn and "سوق القنوات" in t, "critical", "admin-add-choice",
+           f"الأدمن أضاف البوت لقناته: خيار السوق={bool(mp_btn)} الربط={bool(bind_btn)} | {t[:150]}")
+    expect(await MP.channel_by_chat(CH_ADM1) is None, "high", "admin-no-auto", "سُجّلت في السوق قبل أن يختار الأدمن")
+    out = await a.click(f"mp:reg:{CH_ADM1}")
+    t = texts_to(out, A)  # noqa: F405
+    ch_a = await MP.channel_by_chat(CH_ADM1)
+    expect(ch_a and ch_a["owner_user_id"] == A and "تم التحقق" in t and find_btn(out, A, "mp:cat:"), "critical", "admin-mp-reg",  # noqa: F405
+           f"زر «اعرضها في السوق» لم يبدأ التسجيل: {t[:150]}")
+    await drive(a, [f"cb:mp:cat:{ch_a['id']}:shopping", "t:5", "cb:mp:p48skip", "cb:mp:pinskip", "cb:mp:blurbskip"])
+    await a.press("أوافق وأرسل")
+    expect((await PC.get(ch_a["id"]))["mp_status"] == "pending", "high", "admin-mp-submit", "قناة الأدمن لم تصل للمراجعة")
+    # الأدمن ضغط «سجّل قناتي» ثم أضاف البوت ← مباشرة إلى السوق بلا سؤال
+    await drive(a, ["cb:mp:home", "cb:mp:add"])
+    out = await chat_member_update(env, CH_ADM2, A, False, True)  # noqa: F405
+    t = texts_to(out, A)  # noqa: F405
+    expect("تم التحقق" in t and not find_btn(out, A, "adm:ch:bind:"), "critical", "admin-registering",  # noqa: F405
+           f"الأدمن في خطوة «سجّل قناتي» لكن ظهر له الربط الإداري: {t[:150]}")
+    # إعادة توجيه رسالة من القناة أثناء خطوة التسجيل ← السوق (لا تبتلعها لوحة الأدمن)
+    FAKE[CH_ADM4]["bot"] = {"post": True, "delete": True, "edit": True}
+    await drive(a, ["cb:mp:home", "cb:mp:add"])
+    from aiogram.types import MessageOriginChannel
+    fwd = MessageOriginChannel(date=datetime.now(), chat=Chat(id=CH_ADM4, type="channel", title="قناة إعادة توجيه", username="admin_fwd"),
+                               message_id=77)
+    out = await a._feed(Update(update_id=next(_upd), message=a._message(text="منشور من القناة", forward_origin=fwd)), "↪️ إعادة توجيه")
+    expect("تم التحقق" in texts_to(out, A), "high", "admin-forward", f"إعادة التوجيه أثناء التسجيل لم تصل للسوق: {texts_to(out, A)[:120]}")  # noqa: F405
+    # الربط الإداري القديم ما زال يعمل
+    out = await chat_member_update(env, CH_ADM3, A, False, True)  # noqa: F405
+    await a.click(f"adm:ch:bind:alerts:{CH_ADM3}")
+    from app.services import channels as CHS
+    expect((await CHS.get("alerts") or {}).get("id") == CH_ADM3, "critical", "admin-bind", "ربط قناة التنبيهات تعطّل")
+    expect(await MP.channel_by_chat(CH_ADM3) is None, "high", "bind-not-mp", "قناة إدارية دخلت السوق")
+    # إزالة البوت من قناة سوق يملكها الأدمن ← منطق السوق يعمل
+    await a.click(f"adm:mp:ok:{ch_a['id']}")
+    await chat_member_update(env, CH_ADM1, A, True, False)  # noqa: F405
+    expect((await PC.get(ch_a["id"]))["mp_status"] == "suspended", "critical", "admin-remove-mp", "إزالة البوت من قناة سوق الأدمن لم توقفها")
+    # إعادة إضافته ← يعامل كقناة سوق (بطاقتها) لا كقناة إدارية
+    out = await chat_member_update(env, CH_ADM1, A, False, True)  # noqa: F405
+    expect(not find_btn(out, A, "adm:ch:bind:") and "مسجّلة عندك" in texts_to(out, A), "high", "admin-readd-mp",  # noqa: F405
+           f"إعادة إضافة البوت لقناة سوق عرضت الربط الإداري: {texts_to(out, A)[:120]}")  # noqa: F405
+    await a.click(f"adm:mp:res:{ch_a['id']}")
 
     # ═══ Z نهاية: إنهاء كل شيء + ثوابت ═══
     section("Z) إنهاء كل المنشورات الجارية + الثوابت")

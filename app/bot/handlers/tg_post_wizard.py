@@ -482,6 +482,12 @@ async def cb_confirm(cb: CallbackQuery, state: FSMContext) -> None:
     await cb.answer("✅ تم الخصم — استلمنا طلبك")
     balance = await users_repo.get_balance(cb.from_user.id)
     text = T.TGP_DONE.format(id=order["id"], price=fmt(order["price_usd"]), balance=fmt(balance), title=T.esc(spec["channel_title"]))
+    if MP.is_mp_channel(await PC.get(int(spec.get("channel_id") or 0))):
+        # 💼 قناة سوق: صاحبها يقبل والبوت ينشر ويراقب — لا «نراجع ونؤكد» ولا «ملخص مشاهدات»
+        title = T.esc(spec["channel_title"])
+        step1 = (TX.TGP_DONE_MP_STEP1_COPY.format(title=title) if not spec.get("text")
+                 else TX.TGP_DONE_MP_STEP1.format(title=title, hours=(await MP.cfg())["accept_hours"]))
+        text = TX.TGP_DONE_MP.format(id=order["id"], price=fmt(order["price_usd"]), balance=fmt(balance), step1=step1)
     sent = None
     try:
         await cb.message.edit_text(text, reply_markup=K.tgp_done(order["id"]))
@@ -491,8 +497,9 @@ async def cb_confirm(cb: CallbackQuery, state: FSMContext) -> None:
     if sent:
         await orders_repo.set_messages(order["id"], user_msg_id=sent.message_id)
     from app.services import order_notify, mp_notify
+    # 💼 قناة سوق: نربط الطلب بصاحبها ونرسل له طلب القبول أولاً، فتخرج بطاقة الأدمن بصيغة السوق من البداية
+    await mp_notify.after_customer_paid(cb.bot, order["id"])
     await order_notify.notify_admins_new_order(cb.bot, order["id"])
-    await mp_notify.after_customer_paid(cb.bot, order["id"])   # 💼 قناة سوق ← طلب القبول لصاحبها
 
 
 # ───────────── استئناف مسودة (يستدعيه ord:resume) ─────────────
