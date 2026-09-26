@@ -72,7 +72,7 @@ async def cb_add(cb: CallbackQuery, state: FSMContext) -> None:
         f"📤 <b>إضافة أزواج SUB-{sid}</b> — {SD._esc(sub.get('label'))}\n\n"
         "أرسل كل تصميم <b>ونصّه تحته</b> (كما سيصل الزبون تماماً) — كل رسالة = زوج جاهز 📥\n"
         "أرسل <b>✅ تم</b> عندما تنتهي، أو «❌ إلغاء».",
-        K.admin_sub_input_bar(sid), back_cb=f"adm:sub:{sid}:cancel_done")
+        K.admin_sub_input_bar(sid))
 
 
 @router.message(ScheduledAdmin.pairs, F.photo | F.video | F.document)
@@ -220,7 +220,10 @@ async def cb_send_now(cb: CallbackQuery, state: FSMContext) -> None:
 @router.callback_query(F.data.regexp(r"^adm:sub:(\d+):cancel_done$"))
 async def cb_cancel_done(cb: CallbackQuery, state: FSMContext) -> None:
     await state.clear()
-    await cb.message.edit_text("✅ انتهى الإدخال — يمكنك إضافة دفعة أخرى لاحقاً من Cpanel أو من هنا.")
+    try:
+        await cb.message.edit_text("✅ انتهى الإدخال — يمكنك إضافة دفعة أخرى لاحقاً من Cpanel أو من هنا.")
+    except Exception:  # noqa: BLE001 — الرسالة محذوفة؟ نرسل تأكيداً جديداً بدل الخطأ
+        await cb.bot.send_message(cb.from_user.id, "✅ انتهى الإدخال.")
     await cb.answer()
 
 

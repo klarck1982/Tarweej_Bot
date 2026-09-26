@@ -213,7 +213,7 @@ def admin_sub_card(sub_id: int) -> InlineKeyboardMarkup:
 
 def admin_sub_input_bar(sub_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
-        [ib("👁️ الطابور", f"adm:sub:{sub_id}:queue"), ib("✅ تم — إنهاء الإدخال", "adm:sub:done", "success")],
+        [ib("👁️ الطابور", f"adm:sub:{sub_id}:queue"), ib("✅ تم — إنهاء الإدخال", f"adm:sub:{sub_id}:cancel_done", "success")],
     ])
 
 
