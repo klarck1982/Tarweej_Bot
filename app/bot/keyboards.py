@@ -217,6 +217,18 @@ def admin_sub_input_bar(sub_id: int) -> InlineKeyboardMarkup:
     ])
 
 
+def quickadd_sub_list(rows: list) -> InlineKeyboardMarkup:
+    """قائمة الاشتراكات النشطة للدخول السريع (/add) — اسم الزبون أولاً للتمييز السريع."""
+    kb = []
+    for r in rows:
+        who = (r.get("customer_name") or r.get("target_title")
+               or r.get("user_name") or r.get("package_title") or "")[:18]
+        kb.append([ib(f"SUB-{r['id']} · {who} · {int(r.get('ready_items') or 0)}/{int(r['total_items'])}",
+                     f"adm:quickadd:{r['id']}")])
+    kb.append([ib("❌ إلغاء", "adm:cancel_input", "danger")])
+    return InlineKeyboardMarkup(inline_keyboard=kb)
+
+
 def admin_pair_bar(sub_id: int, seq: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [ib("🗑️ حذف هذا الزوج", f"adm:sub:{sub_id}:del:{seq}", "danger")],
@@ -378,6 +390,7 @@ def admin_panel(topups: int = 0, tasks: int = 0, tickets: int = 0, orders: int =
             "primary" if attention else None)],
         [ib(f"🛠️ مهام يدوية{n(tasks)}" + (f" · 🔴 {late}" if late else ""), "adm:tasks", "danger" if late else ("primary" if tasks else None))],
         [ib(f"🎫 تذاكر{n(tickets)}", "adm:tickets", "primary" if tickets else None)],
+        [ib("🎨 إدخال تصاميم", "adm:quickadd")],
         [ib("💼 سوق القنوات", "adm:mp")],
         [ib("📊 إحصائيات", "adm:stats")],
         [ib("📣 بث رسالة", "adm:bc")],

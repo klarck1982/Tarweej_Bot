@@ -1,5 +1,6 @@
-"""➕ إدخال أزواج باقة التصميم اليومي (تصميم + نصّه) من خاص الأدمن — بطاقات تأكيد بالمعاينة.
+"""⚡➕ الإدخال السريع للمصمم (/add) + إدخال أزواج باقة التصميم اليومي — بطاقات تأكيد بالمعاينة.
 
+    /add · adm:quickadd      ← اختيار الاشتراك ثم رمي التصاميم دفعة واحدة (ألبوم/تتابع)
     adm:sub:{id}:add    ← أرسل الأزواج (صورة وتحتها النص) — كل رسالة زوج جاهز
     adm:sub:{id}:queue  ← استعراض الطابور كما سيُرسل مع 🗑️
     adm:sub:{id}:now    ← ▶️ أرسل التالي الآن
@@ -11,6 +12,7 @@ from __future__ import annotations
 import logging
 
 from aiogram import F, Router
+from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import CallbackQuery, Message
@@ -18,6 +20,7 @@ from aiogram.types import CallbackQuery, Message
 from app.bot import keyboards as K
 from app.config import settings
 from app.bot.handlers.admin import _common as C
+from app.db.repo import scheduled as SR
 from app.services import scheduled as SD
 from app.services.pricing import fmt
 
@@ -47,6 +50,16 @@ def _file(message: Message) -> tuple[str, str] | None:
     return None
 
 
+def _pending(data: dict) -> list:
+    """الملفات المعلّقة بلا نص (FIFO) — مع دعم جلسة قديمة (ملف واحد بمفتاحين)."""
+    items = data.get("pending_files")
+    if isinstance(items, list):
+        return [dict(x) for x in items if isinstance(x, dict) and x.get("file_id")]
+    if data.get("file_id"):
+        return [{"kind": data.get("file_kind") or "photo", "file_id": data["file_id"]}]
+    return []
+
+
 def sub_card_text(sub: dict) -> str:
     st = {"scheduled": "🟢 تعمل", "paused": "⏸️ متوقفة", "completed": "✅ مكتملة",
           "refunded": "↩️ مستردة", "cancelled": "🚫 ملغاة", "awaiting_assets": "📝 جديدة"}.get(sub["status"], sub["status"])
@@ -60,9 +73,49 @@ def sub_card_text(sub: dict) -> str:
     )
 
 
+@router.message(Command("add"))
+async def cmd_quickadd(message: Message) -> None:
+    """⚡ دخول المصمم السريع: اختيار الاشتراك ثم رمي التصاميم دفعة واحدة."""
+    text, kb = await _quickadd_list()
+    await message.answer(text, reply_markup=kb)
+
+
+@router.callback_query(F.data == "adm:quickadd")
+async def cb_quickadd_menu(cb: CallbackQuery) -> None:
+    text, kb = await _quickadd_list()
+    try:
+        await cb.message.edit_text(text, reply_markup=kb)
+    except Exception:  # noqa: BLE001
+        await cb.bot.send_message(cb.from_user.id, text, reply_markup=kb)
+    await cb.answer()
+
+
+@router.callback_query(F.data.regexp(r"^adm:quickadd:(\d+)$"))
+async def cb_quickadd_pick(cb: CallbackQuery, state: FSMContext) -> None:
+    await _start_pairs_input(cb, state, int(cb.data.split(":")[2]))
+
+
+async def _quickadd_list() -> tuple:
+    rows = await SR.list_subscriptions("", limit=30)
+    rows = [r for r in rows if r.get("status") in ("scheduled", "awaiting_assets", "paused")][:10]
+    if not rows:
+        return "لا اشتراكات نشطة حالياً — أنشئ اشتراكاً من Cpanel أولاً.", K.home_bar()
+    lines = ["⚡ <b>إدخال سريع</b> — اختر الاشتراك:", ""]
+    for r in rows:
+        who = r.get("customer_name") or r.get("target_title") or r.get("user_name") or ""
+        lines.append(
+            f"<code>SUB-{r['id']}</code> · {SD._esc(r.get('package_title'))}"
+            + (f" · {SD._esc(who)}" if who else "")
+            + f" · جاهز {int(r.get('ready_items') or 0)}/{int(r['total_items'])}")
+    return "\n".join(lines), K.quickadd_sub_list(rows)
+
+
 @router.callback_query(F.data.regexp(r"^adm:sub:(\d+):add$"))
 async def cb_add(cb: CallbackQuery, state: FSMContext) -> None:
-    sid = int(cb.data.split(":")[2])
+    await _start_pairs_input(cb, state, int(cb.data.split(":")[2]))
+
+
+async def _start_pairs_input(cb: CallbackQuery, state: FSMContext, sid: int) -> None:
     sub = await SD.detail(sid)
     if not sub:
         await cb.answer("الاشتراك غير موجود", show_alert=True)
@@ -70,12 +123,15 @@ async def cb_add(cb: CallbackQuery, state: FSMContext) -> None:
     await C.ask_input(
         cb, state, ScheduledAdmin.pairs, {"subscription_id": sid},
         f"📤 <b>إضافة أزواج SUB-{sid}</b> — {SD._esc(sub.get('label'))}\n\n"
-        "أرسل كل تصميم <b>ونصّه تحته</b> (كما سيصل الزبون تماماً) — كل رسالة = زوج جاهز 📥\n"
+        "ابعت براحتك:\n"
+        "• كل تصميم <b>ونصّه تحته</b> ← زوج جاهز فوراً 📥\n"
+        "• أو ابعت <b>الصور دفعة واحدة</b> (ألبوم/ورا بعض) ثم ابعت <b>النصوص بالترتيب</b> ✍️\n"
         "أرسل <b>✅ تم</b> عندما تنتهي، أو «❌ إلغاء».",
         K.admin_sub_input_bar(sid))
 
 
 @router.message(ScheduledAdmin.pairs, F.photo | F.video | F.document)
+@router.message(ScheduledAdmin.pair_text, F.photo | F.video | F.document)
 async def msg_pair_file(message: Message, state: FSMContext) -> None:
     data = await state.get_data()
     sid = int(data.get("subscription_id") or 0)
@@ -84,25 +140,63 @@ async def msg_pair_file(message: Message, state: FSMContext) -> None:
         await message.answer("أرسل التصميم كصورة أو ملف أو فيديو.")
         return
     kind, file_id = file_info
-    caption = (message.caption or "").strip()
-    if not caption:
-        await state.update_data(file_kind=kind, file_id=file_id)
-        await state.set_state(ScheduledAdmin.pair_text)
-        await message.answer("✍️ ممتازة! أرسل الآن نصّها (مع الإيموجي) ليكتمل الزوج:")
-        return
-    await _save_pair(message, state, sid, kind, file_id, caption)
+    caption = (message.caption or "").strip() or None
+    pend = _pending(data)
+    pend.append({"kind": kind, "file_id": file_id, "caption": caption})
+    await state.update_data(pending_files=pend, file_kind=None, file_id=None)
+    await state.set_state(ScheduledAdmin.pair_text)
+    if not await _flush_leading(message, state, sid):
+        await message.answer(
+            f"📥 استلمت صورة {len(pend)} — أرسل نصّها الآن، "
+            "أو كمّل صور ثم أرسل النصوص بالترتيب ✍️")
+
+
+async def _flush_leading(message: Message, state: FSMContext, sid: int) -> int:
+    """يحفظ الملفات المعلّقة المكتملة (لها نص) من أول الطابور — يعيد عدد المحفوظ."""
+    pend = _pending(await state.get_data())
+    saved = 0
+    while pend and pend[0].get("caption"):
+        entry = pend[0]
+        ok = await _save_pair(message, state, sid, entry.get("kind") or "photo",
+                              entry.get("file_id"), entry.get("caption"), quiet=len(pend) > 1)
+        if not ok:
+            break  # الخطأ ظهر للمصمم — يبقى الملف معلقاً ليصلحه (نص أقصر/تمديد العدد)
+        pend.pop(0)
+        saved += 1
+    await state.update_data(pending_files=pend)
+    if not pend:
+        await state.set_state(ScheduledAdmin.pairs)
+    return saved
 
 
 @router.message(ScheduledAdmin.pair_text, F.text)
 async def msg_pair_text(message: Message, state: FSMContext) -> None:
-    if _cancel(message):
-        await state.clear()
-        await message.answer("تم الإلغاء — لم يُحفظ نصف زوج.", reply_markup=K.home_bar())
-        return
+    text = (message.text or "").strip()
     data = await state.get_data()
     sid = int(data.get("subscription_id") or 0)
-    await _save_pair(message, state, sid, str(data.get("file_kind")), str(data.get("file_id")), (message.text or "").strip())
-    await state.set_state(ScheduledAdmin.pairs)
+    pend = _pending(data)
+    if _cancel(message):
+        if text == "✅ تم" and pend:
+            await message.answer(
+                f"⏳ عندك {len(pend)} صور بلا نص — أرسل نصوصها بالترتيب أولاً، "
+                "أو «❌ إلغاء» لتجاهلها.")
+            return
+        await state.clear()
+        if text == "✅ تم":
+            await message.answer(f"✅ انتهى الإدخال — SUB-{sid}", reply_markup=K.home_bar())
+        else:
+            await message.answer("تم الإلغاء — لم يُحفظ نصف زوج.", reply_markup=K.home_bar())
+        return
+    if not pend:
+        await message.answer("أرسل التصميم أولاً ثم نصّه 📎")
+        await state.set_state(ScheduledAdmin.pairs)
+        return
+    pend[0]["caption"] = text
+    await state.update_data(pending_files=pend)
+    await _flush_leading(message, state, sid)
+    rest = _pending(await state.get_data())
+    if rest:
+        await message.answer(f"⏳ بقي {len(rest)} — أرسل النص التالي:")
 
 
 @router.message(ScheduledAdmin.pairs, F.text)
@@ -112,7 +206,7 @@ async def msg_pairs_text(message: Message, state: FSMContext) -> None:
         await state.clear()
         await message.answer(f"✅ انتهى الإدخال — SUB-{sid}", reply_markup=K.home_bar())
         return
-    await message.answer("أرسل التصميم كصورة ونصّه تحته (caption) 📎 — أو «✅ تم» للانتهاء.")
+    await message.answer("أرسل التصاميم (دفعة/ألبوم أو واحداً واحداً) 📎 — أو «✅ تم» للانتهاء.")
 
 
 @router.message(ScheduledAdmin.pair_text)
@@ -120,16 +214,17 @@ async def msg_pair_text_wrong(message: Message) -> None:
     await message.answer("أرسل النص الكتابي برسالة نصية ✍️")
 
 
-async def _save_pair(message: Message, state: FSMContext, sid: int, kind: str, file_id: str, text: str) -> None:
+async def _save_pair(message: Message, state: FSMContext, sid: int, kind: str, file_id: str,
+                     text: str, quiet: bool = False) -> bool:
     try:
         item, alert = await SD.add_pair(sid, kind, file_id, text)
     except ValueError as e:
         await message.answer(f"⚠️ {SD._esc(str(e))}")
-        return
+        return False
     except Exception:  # noqa: BLE001
         log.exception("pair save failed sub=%s", sid)
         await message.answer("تعذر حفظ الزوج — حاول مرة أخرى.")
-        return
+        return False
     sub = await SD.detail(sid)
     # بطاقة الحفظ بالمعاينة الحرفية (ما تراه = ما سيصل)
     try:
@@ -148,7 +243,7 @@ async def _save_pair(message: Message, state: FSMContext, sid: int, kind: str, f
     except Exception:  # noqa: BLE001
         await message.answer(f"✅ حُفظ زوج {item['seq']} — {SD._esc(sub.get('label'))}",
                              reply_markup=K.admin_pair_bar(sid, item["seq"]))
-    if sub:
+    if sub and not quiet:
         await message.answer(sub_card_text(sub))
     if alert:
         try:
@@ -156,6 +251,7 @@ async def _save_pair(message: Message, state: FSMContext, sid: int, kind: str, f
             await ON.notify_admins_text(message.bot, alert)
         except Exception:  # noqa: BLE001
             pass
+    return True
 
 
 @router.callback_query(F.data.regexp(r"^adm:sub:(\d+):queue$"))
