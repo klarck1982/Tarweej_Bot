@@ -24,6 +24,12 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from aiogram import Bot
+from aiogram.exceptions import (
+    TelegramBadRequest,
+    TelegramForbiddenError,
+    TelegramNetworkError,
+    TelegramRetryAfter,
+)
 from aiogram.types import BufferedInputFile
 from aiohttp import web
 
@@ -461,10 +467,39 @@ def make_scheduled_pair_upload(bot: Bot):
                 return _json({"error": "invalid", "message": "أرفق ملف التصميم أولاً."}, 400)
             sid = int(fields.get("id") or 0)
             seq = int(fields.get("seq") or 0)
+            # فشل سريع قبل رحلة تيليغرام: اشتراك موجود؟ تسلسل صالح؟ الزوج غير مُسلَّم؟
+            sub = await SD.detail(sid)
+            if not sub:
+                return _json({"error": "missing", "message": "الاشتراك غير موجود"}, 404)
+            if not 1 <= seq <= 365:
+                return _json({"error": "invalid", "message": "رقم التسلسل خارج الحدود"}, 400)
+            existing = next((i for i in (sub.get("items") or []) if int(i.get("seq") or 0) == seq), None)
+            if existing and existing.get("status") == "sent":
+                return _json({"error": "invalid", "message": "هذا الزوج سُلّم بالفعل — لا يُعدَّل"}, 400)
             kind = "photo" if str(filename).lower().endswith(("png", "jpg", "jpeg", "webp", "gif")) else "document"
-            msg = await bot.send_document(user["id"], BufferedInputFile(data, filename=filename),
-                                          caption=f"📦 رفع زوج تصميم SUB-{sid} · تسلسل {seq}")
-            file_id = msg.document.file_id
+            # الرفع إلى تيليغرام (للحصول على file_id) — كل فشل هنا بسبب واضح وقابل للعلاج
+            try:
+                msg = await bot.send_document(user["id"], BufferedInputFile(data, filename=filename),
+                                              caption=f"📦 رفع زوج تصميم SUB-{sid} · تسلسل {seq}")
+            except TelegramForbiddenError:
+                return _json({"error": "no_dm",
+                              "message": "تعذّر الإرسال إلى خاصّك — افتح محادثة البوت واضغط Start ثم أعد الرفع."}, 400)
+            except TelegramRetryAfter as e:
+                return _json({"error": "retry",
+                              "message": f"تيليغرام طلب الانتظار {e.retry_after} ثانية — أعد المحاولة بعدها."}, 429)
+            except TelegramNetworkError:
+                return _json({"error": "network",
+                              "message": "تعذّر الاتصال بخوادم تيليغرام — أعد المحاولة بعد قليل."}, 502)
+            except TelegramBadRequest as e:
+                return _json({"error": "rejected",
+                              "message": f"تيليغرام رفض الملف ({e.message}) — جرّب صيغة أو حجماً آخر."}, 400)
+            doc = msg.document
+            if doc is None and msg.photo:
+                doc = msg.photo[-1]
+                kind = "photo"
+            if doc is None:
+                return _json({"error": "server", "message": "تيليغرام لم يرجع معرّفاً للملف — أعد المحاولة."}, 502)
+            file_id = doc.file_id
             try:
                 await bot.delete_message(user["id"], msg.message_id)
             except Exception:  # noqa: BLE001
@@ -479,7 +514,8 @@ def make_scheduled_pair_upload(bot: Bot):
             return _json({"error": "invalid", "message": str(e)}, 400)
         except Exception as e:  # noqa: BLE001
             log.exception("scheduled pair upload failed: %s", e)
-            return _json({"error": "server", "message": "تعذر رفع التصميم وحفظه."}, 500)
+            detail = f"{type(e).__name__}: {e}".strip()
+            return _json({"error": "server", "message": f"تعذر الرفع ({detail})"}, 500)
     return scheduled_pair_upload
 
 
