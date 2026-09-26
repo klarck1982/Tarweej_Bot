@@ -16,9 +16,10 @@
 
 from __future__ import annotations
 
-import html
+import hmac
 import json
 import logging
+import secrets
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -259,15 +260,21 @@ async def scheduled_package_delete(request: web.Request) -> web.Response:
     return _json({"ok": True, "scheduled": await SD.snapshot()})
 
 
-async def scheduled_subscribers(request: web.Request) -> web.Response:
+async def scheduled_list(request: web.Request) -> web.Response:
     _auth(request)
     body = await _body(request)
+    tab = str(body.get("tab") or "active")
+    if tab not in ("active", "paused", "done"):
+        tab = "active"
     q = str(body.get("q") or "")[:100]
-    page = max(1, int(body.get("page") or 1))
-    limit = 40
-    from app.db.repo import scheduled as SR
-    rows = await SR.list_subscriptions(q, limit=limit, offset=(page - 1) * limit)
-    return _json({"items": rows, "count": await SR.count_subscriptions(q), "page": page})
+    rows = await SD.list_views(q, limit=200)
+    groups = {
+        "active": {"scheduled", "awaiting_assets"},
+        "paused": {"paused"},
+        "done": {"completed", "cancelled", "refunded"},
+    }
+    wanted = groups[tab]
+    return _json({"items": [r for r in rows if str(r.get("status")) in wanted], "tab": tab, "count": len(rows)})
 
 
 async def scheduled_detail(request: web.Request) -> web.Response:
@@ -282,21 +289,153 @@ async def scheduled_detail(request: web.Request) -> web.Response:
     return _json(item)
 
 
-async def scheduled_content_json(request: web.Request) -> web.Response:
+async def scheduled_create(request: web.Request) -> web.Response:
     user = _auth(request)
     body = await _body(request)
+    bot = request.app["bot"]
     try:
-        item = await SD.add_content(int(body.get("subscription_id") or 0), int(body.get("seq") or 0),
-                                    str(body.get("file_kind") or "document"), str(body.get("file_id") or ""),
-                                    str(body.get("copy_text") or ""))
+        sub = await SD.create_manual(
+            admin_id=user["id"],
+            name=str(body.get("user") or "").strip(),
+            target_ref=str(body.get("target_ref") or "").strip(),
+            total_items=max(1, int(body.get("total_items") or 0)),
+            send_time=str(body.get("send_time") or "20:00"),
+            package_title=str(body.get("package_title") or "").strip(),
+            note=str(body.get("note") or "").strip()[:200],
+            price_ref=str(body.get("price_ref") or "").strip(),
+            bot=bot,
+        )
     except ValueError as e:
         return _json({"error": "invalid", "message": str(e)}, 400)
-    await CP.audit(user["id"], "scheduled", f"content.{body.get('subscription_id')}.{body.get('seq')}", None, "saved")
+    except Exception as e:  # noqa: BLE001
+        log.exception("scheduled create failed: %s", e)
+        return _json({"error": "server", "message": "تعذر إنشاء الاشتراك."}, 500)
+    await CP.audit(user["id"], "scheduled", f"subscription.{sub['id']}.create", None, sub.get("status"))
+    return _json({"ok": True, "subscription": await SD.detail(int(sub["id"]))})
+
+
+async def scheduled_update(request: web.Request) -> web.Response:
+    user = _auth(request)
+    body = await _body(request)
+    bot = request.app["bot"]
+    sid = int(body.get("id") or 0)
+    kwargs: dict[str, object] = {}
+    if body.get("send_time") is not None:
+        kwargs["send_time"] = str(body.get("send_time"))
+    if body.get("user") is not None:
+        kwargs["name"] = str(body.get("user"))
+    if body.get("package_title") is not None:
+        kwargs["package_title"] = str(body.get("package_title"))
+    if body.get("note") is not None:
+        kwargs["note"] = str(body.get("note"))
+    if body.get("total_items") is not None:
+        kwargs["total_items"] = int(body.get("total_items"))
+    try:
+        await SD.update_sub(sid, **kwargs)
+    except (TypeError, ValueError) as e:
+        return _json({"error": "invalid", "message": str(e)}, 400)
+    if body.get("target_ref") is not None:
+        raw = str(body.get("target_ref")).strip()
+        try:
+            target = await SD.resolve_target(bot, raw) if raw else None
+        except ValueError as e:
+            return _json({"error": "invalid", "message": str(e)}, 400)
+        from app.db.repo import scheduled as SR
+        if target:
+            await SR.update_fields(sid, target_chat_id=target["chat_id"],
+                                   target_kind=target["kind"], target_title=target["title"])
+        else:
+            await SR.update_fields(sid, target_chat_id=None, target_kind=None, target_title=None)
+    await CP.audit(user["id"], "scheduled", f"subscription.{sid}.update", None, str(kwargs))
+    return _json({"ok": True, "subscription": await SD.detail(sid)})
+
+
+async def scheduled_action(request: web.Request) -> web.Response:
+    user = _auth(request)
+    body = await _body(request)
+    sid = int(body.get("id") or 0)
+    action = str(body.get("action") or "")
+    bot = request.app["bot"]
+    try:
+        if action == "pause":
+            sub = await SD.pause(sid)
+        elif action == "resume":
+            sub = await SD.resume(sid)
+        elif action == "send_now":
+            status, _info = await SD.deliver_next(bot, sid, manual=True)
+            await CP.audit(user["id"], "scheduled", f"subscription.{sid}.send_now", None, status)
+            return _json({"ok": True, "delivery": status, "subscription": await SD.detail(sid)})
+        elif action == "extend":
+            add = max(1, int(body.get("add_count") or 0))
+            sub = await SD.extend(sid, add, 0)
+        elif action == "delete_msg":
+            seq = int(body.get("seq") or 0)
+            ok, err = await SD.delete_sent_message(bot, sid, seq)
+            if not ok:
+                return _json({"error": "invalid", "message": err or "تعذر حذف الرسالة"}, 400)
+            await CP.audit(user["id"], "scheduled", f"pair.{sid}.{seq}.delete_msg", None, "deleted")
+            return _json({"ok": True, "subscription": await SD.detail(sid)})
+        elif action == "cancel":
+            sub, refund = await SD.cancel(sid, admin_id=user["id"])
+            if not sub:
+                return _json({"error": "missing", "message": "الاشتراك غير موجود"}, 404)
+            await CP.audit(user["id"], "scheduled", f"subscription.{sid}.cancel", None, str(refund))
+            try:
+                await bot.send_message(sub["user_id"],
+                    f"↩️ ألغيت الإدارة باقة التصميم «{SD._esc(sub.get('package_title'))}»"
+                    + (f" واستُرد لك ما قيمته {refund} رصيد من الأيام غير المنفذة." if refund > 0 else "."))
+            except Exception:  # noqa: BLE001
+                pass
+            return _json({"ok": True, "refund": str(refund), "subscription": await SD.detail(sid)})
+        else:
+            return _json({"error": "invalid", "message": "الإجراء غير معروف"}, 400)
+    except ValueError as e:
+        return _json({"error": "invalid", "message": str(e)}, 400)
+    except Exception as e:  # noqa: BLE001
+        log.exception("scheduled action failed: %s", e)
+        return _json({"error": "server", "message": str(e)[:160]}, 500)
+    if not sub:
+        return _json({"error": "missing", "message": "الاشتراك غير موجود"}, 404)
+    await CP.audit(user["id"], "scheduled", f"subscription.{sid}.{action}", None, sub.get("status"))
+    try:
+        if action == "pause":
+            await bot.send_message(sub.get("user_id"), "⏸️ تم إيقاف باقة التصميم مؤقتاً.")
+        elif action == "resume":
+            await bot.send_message(sub.get("user_id"), "▶️ استؤنفت باقة التصميم.")
+        elif action == "extend":
+            await bot.send_message(sub.get("user_id"),
+                f"➕ مُدّدت باقة التصميم «{SD._esc(sub.get('package_title'))}» · المجموع الآن {sub['total_items']} تصميماً.")
+    except Exception:  # noqa: BLE001
+        pass
+    return _json({"ok": True, "subscription": await SD.detail(sid)})
+
+
+async def scheduled_pair_text(request: web.Request) -> web.Response:
+    user = _auth(request)
+    body = await _body(request)
+    item, err = await SD.save_pair(int(body.get("id") or 0), int(body.get("seq") or 0),
+                                   copy=str(body.get("copy") or ""))
+    if err == "الاشتراك غير موجود":
+        return _json({"error": "missing", "message": err}, 404)
+    if err:
+        return _json({"error": "invalid", "message": err}, 400)
+    await CP.audit(user["id"], "scheduled", f"pair.{body.get('id')}.{body.get('seq')}.text", None, "saved")
     return _json({"ok": True, "item": item})
 
 
-def make_scheduled_upload(bot: Bot):
-    async def scheduled_upload(request: web.Request) -> web.Response:
+async def scheduled_pair_delete(request: web.Request) -> web.Response:
+    user = _auth(request)
+    body = await _body(request)
+    sid, seq = int(body.get("id") or 0), int(body.get("seq") or 0)
+    ok = await SD.delete_pair(sid, seq)
+    if not ok:
+        return _json({"error": "missing", "message": "لا يمكن حذف هذا الزوج (غير موجود أو أُرسل)"}, 404)
+    await CP.audit(user["id"], "scheduled", f"pair.{sid}.{seq}.delete", None, "deleted")
+    return _json({"ok": True})
+
+
+def make_scheduled_pair_upload(bot: Bot):
+    async def scheduled_pair_upload(request: web.Request) -> web.Response:
         user = _auth(request)
         if request.content_length and request.content_length > 22 * 1024 * 1024:
             return _json({"error": "too_large", "message": "الملف أكبر من 20MB."}, 413)
@@ -305,14 +444,12 @@ def make_scheduled_upload(bot: Bot):
             fields: dict[str, str] = {}
             data = None
             filename = "design.bin"
-            content_type = "application/octet-stream"
             while True:
                 part = await reader.next()
                 if part is None:
                     break
                 if part.name == "file":
                     filename = part.filename or filename
-                    content_type = part.headers.get("Content-Type", content_type)
                     data = await part.read(decode=False)
                     if len(data) > 20 * 1024 * 1024:
                         return _json({"error": "too_large", "message": "الملف أكبر من 20MB."}, 413)
@@ -320,76 +457,48 @@ def make_scheduled_upload(bot: Bot):
                     fields[part.name] = (await part.text()).strip()
             if not data:
                 return _json({"error": "invalid", "message": "أرفق ملف التصميم أولاً."}, 400)
-            sid = int(fields.get("subscription_id") or 0)
+            sid = int(fields.get("id") or 0)
             seq = int(fields.get("seq") or 0)
-            # نرفعه إلى Telegram كملف للحفاظ على الدقة الأصلية، ثم نحفظ file_id فقط.
+            kind = "photo" if str(filename).lower().endswith(("png", "jpg", "jpeg", "webp", "gif")) else "document"
             msg = await bot.send_document(user["id"], BufferedInputFile(data, filename=filename),
-                                          caption=f"📦 حفظ مؤقت لجدولة SUB-{sid} · اليوم {seq}")
+                                          caption=f"📦 رفع زوج تصميم SUB-{sid} · تسلسل {seq}")
             file_id = msg.document.file_id
             try:
                 await bot.delete_message(user["id"], msg.message_id)
-            except Exception:
+            except Exception:  # noqa: BLE001
                 pass
-            item = await SD.add_content(sid, seq, "document", file_id, fields.get("copy_text", ""))
-            await CP.audit(user["id"], "scheduled", f"content.{sid}.{seq}", None, "uploaded")
+            copy = fields.get("copy") or fields.get("copy_text") or None
+            item, err = await SD.save_pair(sid, seq, copy=copy, photo=(kind, file_id))
+            if err:
+                return _json({"error": "invalid", "message": err}, 400 if err != "الاشتراك غير موجود" else 404)
+            await CP.audit(user["id"], "scheduled", f"pair.{sid}.{seq}.upload", None, filename)
             return _json({"ok": True, "item": item})
         except ValueError as e:
             return _json({"error": "invalid", "message": str(e)}, 400)
         except Exception as e:  # noqa: BLE001
-            log.exception("scheduled upload failed: %s", e)
+            log.exception("scheduled pair upload failed: %s", e)
             return _json({"error": "server", "message": "تعذر رفع التصميم وحفظه."}, 500)
-    return scheduled_upload
+    return scheduled_pair_upload
 
 
-async def scheduled_activate(request: web.Request) -> web.Response:
-    user = _auth(request)
-    body = await _body(request)
+async def scheduled_photo(request: web.Request) -> web.Response:
     try:
-        sub = await SD.activate(int(body.get("id") or 0), str(body.get("start_date") or ""), str(body.get("send_time") or "") or None)
-    except ValueError as e:
-        return _json({"error": "invalid", "message": str(e)}, 400)
-    except Exception as e:  # noqa: BLE001
-        log.exception("scheduled activate failed: %s", e)
-        return _json({"error": "server", "message": "تعذر تفعيل الجدولة."}, 500)
-    if not sub:
-        return _json({"error": "missing", "message": "الاشتراك غير موجود"}, 404)
-    await CP.audit(user["id"], "scheduled", f"subscription.{sub['id']}.activate", None, sub.get("start_at"))
-    try:
-        await request.app["bot"].send_message(sub["user_id"], f"✅ تم تجهيز باقة <b>{html.escape(str(sub.get('package_title') or ''), quote=False)}</b>\nسيبدأ الإرسال حسب الموعد المحدد.")
-    except Exception:
-        pass
-    return _json({"ok": True, "subscription": await SD.detail(int(sub["id"]))})
-
-
-async def scheduled_action(request: web.Request) -> web.Response:
-    user = _auth(request)
-    body = await _body(request)
-    sid = int(body.get("id") or 0)
-    action = str(body.get("action") or "")
-    try:
-        if action == "pause":
-            sub = await SD.pause(sid)
-        elif action == "resume":
-            sub = await SD.resume(sid)
-        elif action == "cancel":
-            sub = await SD.cancel(sid, admin_id=user["id"])
-        else:
-            return _json({"error": "invalid", "message": "الإجراء غير معروف"}, 400)
-    except Exception as e:  # noqa: BLE001
-        return _json({"error": "server", "message": str(e)[:160]}, 500)
-    if not sub:
-        return _json({"error": "missing", "message": "الاشتراك غير موجود"}, 404)
-    await CP.audit(user["id"], "scheduled", f"subscription.{sid}.{action}", None, sub.get("status"))
-    try:
-        if action == "cancel":
-            await request.app["bot"].send_message(sub["user_id"], "↩️ تم إلغاء باقة التصميم وإعادة قيمة الأيام غير المنفذة إلى رصيدك.")
-        elif action == "pause":
-            await request.app["bot"].send_message(sub["user_id"], "⏸️ تم إيقاف جدولة باقة التصميم مؤقتاً.")
-        elif action == "resume":
-            await request.app["bot"].send_message(sub["user_id"], "▶️ استؤنفت جدولة باقة التصميم.")
-    except Exception:
-        pass
-    return _json({"ok": True, "subscription": await SD.detail(sid)})
+        _auth(request)
+    except web.HTTPException:
+        token = str(request.rel_url.query.get("token") or "")
+        secret = request.app.get("panel_secret") or ""
+        if not token or not secret or not hmac.compare_digest(token, secret):
+            raise
+    sid = int(request.rel_url.query.get("sub") or 0)
+    seq = int(request.rel_url.query.get("seq") or 0)
+    data, filename, content_type = await SD.pair_photo_bytes(request.app["bot"], sid, seq)
+    if data is None:
+        return web.Response(status=404, text="not found")
+    return web.Response(body=data, headers={
+        "Content-Type": content_type or "application/octet-stream",
+        "Content-Disposition": f'inline; filename="{filename}"',
+        "Cache-Control": "private, max-age=3600",
+    })
 
 
 async def financial_ledger(request: web.Request) -> web.Response:
@@ -485,6 +594,7 @@ async def users_directory(request: web.Request) -> web.Response:
 
 def setup_cpanel(app: web.Application, bot: Bot) -> None:
     app["bot"] = bot
+    app["panel_secret"] = secrets.token_urlsafe(24)
     app.router.add_post("/cpanel/api/nour/test", nour_test)
     app.router.add_post("/cpanel/api/nour/report", make_nour_report(bot))
     app.router.add_post("/cpanel/api/reset/preview", reset_preview)
@@ -497,15 +607,15 @@ def setup_cpanel(app: web.Application, bot: Bot) -> None:
     app.router.add_post("/cpanel/api/stats", stats)
     app.router.add_post("/cpanel/api/save/{section}", save)
     app.router.add_post("/cpanel/api/scheduled/snapshot", scheduled_snapshot)
-    app.router.add_post("/cpanel/api/scheduled/package/save", scheduled_package_save)
-    app.router.add_post("/cpanel/api/scheduled/package/toggle", scheduled_package_toggle)
-    app.router.add_post("/cpanel/api/scheduled/package/delete", scheduled_package_delete)
-    app.router.add_post("/cpanel/api/scheduled/subscribers", scheduled_subscribers)
+    app.router.add_post("/cpanel/api/scheduled/list", scheduled_list)
     app.router.add_post("/cpanel/api/scheduled/detail", scheduled_detail)
-    app.router.add_post("/cpanel/api/scheduled/content", scheduled_content_json)
-    app.router.add_post("/cpanel/api/scheduled/upload", make_scheduled_upload(bot))
-    app.router.add_post("/cpanel/api/scheduled/activate", scheduled_activate)
+    app.router.add_post("/cpanel/api/scheduled/create", scheduled_create)
+    app.router.add_post("/cpanel/api/scheduled/update", scheduled_update)
     app.router.add_post("/cpanel/api/scheduled/action", scheduled_action)
+    app.router.add_post("/cpanel/api/scheduled/pair/text", scheduled_pair_text)
+    app.router.add_post("/cpanel/api/scheduled/pair/delete", scheduled_pair_delete)
+    app.router.add_post("/cpanel/api/scheduled/pair/upload", make_scheduled_pair_upload(bot))
+    app.router.add_get("/cpanel/api/scheduled/photo", scheduled_photo)
     app.router.add_post("/cpanel/api/ledger", financial_ledger)
     app.router.add_post("/cpanel/api/users/directory", users_directory)
     app.router.add_post("/cpanel/api/users/ledger", users_ledger)

@@ -70,7 +70,7 @@ async def notify_admins_new_subscriber(bot: Bot, subscription: dict) -> None:
         from app.services import cpanel as CP
         kb = K.admin_scheduled_subscriber(int(subscription["id"]), CP.cpanel_url())
     except Exception:
-        kb = None
+        kb = K.admin_sub_card(int(subscription["id"]))
     for admin_id in settings.admin_ids:
         try:
             await bot.send_message(admin_id, text, reply_markup=kb)

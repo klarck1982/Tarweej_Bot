@@ -13,11 +13,10 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
 from aiogram import Bot
-from aiogram.exceptions import TelegramForbiddenError
 
 from app.config import settings
 from app.db.repo import orders as repo
@@ -37,7 +36,7 @@ def _is_night() -> bool:
     try:
         hour = datetime.now(ZoneInfo(settings.tz)).hour
     except Exception:  # noqa: BLE001
-        hour = datetime.utcnow().hour
+        hour = datetime.now(timezone.utc).hour
     return hour < 8
 
 
@@ -75,7 +74,7 @@ async def _sync_open_orders(bot: Bot) -> None:
     if nour.is_dry_run():
         return
     interval = SYNC_NIGHT_MINUTES if _is_night() else SYNC_DAY_MINUTES
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     if _last_sync and (now - _last_sync).total_seconds() < interval * 60:
         return
     _last_sync = now
@@ -170,71 +169,17 @@ _late_notified: set[int] = set()
 
 
 async def _scheduled_designs(bot: Bot) -> None:
-    """📅 إرسال التصميم + النص المجدول لكل مشترك، مع حجز يمنع التكرار وإعادة محاولة الفشل."""
-    from app.bot import texts as T
-    from app.db.repo import scheduled as SR
-    from app.services import order_notify as ON
-    for _ in range(10):
-        try:
-            item = await SR.due_item()
-        except Exception as e:  # noqa: BLE001
-            log.warning("scheduled content lookup failed: %s", e)
-            return
-        if not item:
-            return
-        overdue = int(item.get("overdue_count") or 0)
-        if overdue >= 2 and item["subscription_id"] not in _late_notified:
-            # تنبيه واحد للأدمن لكل اشتراك متأخر (لكل تشغيل للخادم)
-            _late_notified.add(item["subscription_id"])
-            try:
-                await ON.notify_admins_text(
-                    bot, f"⏰ <b>تسليمات متأخرة</b>\nSUB-{item['subscription_id']} · {overdue} تصاميم فات موعدها\n"
-                         f"ستُرسل تباعاً: تصميم واحد كل {SR.CATCHUP_GAP_MINUTES} دقيقة بدل دفعة واحدة.")
-            except Exception:  # noqa: BLE001
-                pass
-        try:
-            kind = item["file_kind"]
-            if kind == "photo":
-                await bot.send_photo(item["user_id"], item["file_id"])
-            elif kind == "video":
-                await bot.send_video(item["user_id"], item["file_id"])
-            else:
-                await bot.send_document(item["user_id"], item["file_id"])
-            copy_text = item.get("copy_text") or ""
-            if copy_text:
-                await bot.send_message(item["user_id"], T.esc(copy_text))
-            sub = await SR.mark_sent(item["id"], item["subscription_id"])
-            if sub:
-                done = int(sub.get("sent_count") or 0)
-                total = int(sub.get("total_items") or item.get("total_items") or 0)
-                if sub.get("status") == "completed":
-                    message = f"✅ اكتملت باقة التصميم — {done}/{total}\nشكراً لاستخدامك خدمتنا."
-                else:
-                    message = f"🎨 تم إرسال التصميم {item['seq']} من {total}\nالتصميم التالي حسب الموعد المحدد."
-                try:
-                    await bot.send_message(item["user_id"], message)
-                except Exception:
-                    pass
-                if sub.get("status") == "completed":
-                    await ON.notify_admins_text(bot, f"✅ <b>اكتملت باقة التصميم</b>\nSUB-{sub['id']} · {done}/{total}")
-        except Exception as e:  # noqa: BLE001
-            attempts = int(item.get("attempts") or 1)
-            blocked = isinstance(e, TelegramForbiddenError)   # العميل حظر البوت — خطأ دائم، لا فائدة من الإعادة
-            retry = attempts < 3 and not blocked
-            sub = await SR.mark_failed(item["id"], item["subscription_id"], str(e), retry=retry)
-            if blocked:
-                try:
-                    from app.db.repo import users as users_repo
-                    await users_repo.mark_bot_blocked(item["user_id"], True)
-                except Exception:  # noqa: BLE001
-                    pass
-                await ON.notify_admins_text(
-                    bot, f"⏸️ <b>أُوقفت باقة مجدولة مؤقتاً</b>\nSUB-{item['subscription_id']} · التسليم {item['seq']}\n"
-                         "السبب: العميل حظر البوت. استأنفها من Cpanel بعد تواصله معكم.")
-            elif retry:
-                log.warning("scheduled delivery SUB-%s day %s failed (%s/%s): %s", item["subscription_id"], item["seq"], attempts, 3, e)
-            else:
-                await ON.notify_admins_text(bot, f"⚠️ <b>توقفت جدولة تصميم</b>\nSUB-{item['subscription_id']} · اليوم {item['seq']}\nالسبب: {T.esc(str(e)[:250])}")
+    """📅 باقة التصميم اليومي: طابور أزواج — زوج واحد يومياً في ساعة كل اشتراك (Caption).
+
+    الإرسال الفعلي في `services/scheduled.deliver_next` (حجز ذرّي + اعتذار المتأخرات +
+    إيقاع يومي + إيقاف عند الحظر). هنا نكتفي بتشغيل الدورة."""
+    from app.services import scheduled as SD
+    try:
+        sent = await SD.run_due(bot, limit=5)
+        if sent:
+            log.info("scheduled design: delivered %s item(s)", sent)
+    except Exception as e:  # noqa: BLE001 — الحلقة لا تموت
+        log.warning("scheduled design job failed: %s", e)
 
 
 async def _tickets(bot: Bot) -> None:

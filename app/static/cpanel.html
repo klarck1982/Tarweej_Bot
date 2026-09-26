@@ -290,38 +290,48 @@ textarea{min-height:60px;resize:vertical}
     <div style="height:70px"></div>
   </section>
 
-  <!-- ═══ التصميم المجدول ═══ -->
+  <!-- ═══ 🎨 باقة تصميم يومي ═══ -->
   <section id="tab-scheduled" class="hidden">
-    <div class="hero"><div class="ht">📅 التصميم اليومي المجدول</div><div class="hs">الباقات · المشتركون · التصميم + النص · الجدولة</div></div>
-    <div class="sec">📦 الباقات</div>
+    <div class="hero"><div class="ht">🎨 باقة تصميم يومي</div><div class="hs">الباقات · الاشتراكات · طابور الأزواج · إرسال فوري · إلغاء واسترداد · ربط القنوات · معاينة</div></div>
+    <div class="sec">📦 الباقات (تظهر للعملاء في البوت)</div>
     <div class="card" id="sd-packages"></div>
-    <button class="btn p full" style="margin:8px 12px;width:calc(100% - 24px)" onclick="sdNewPackage()">＋ إضافة باقة</button>
-    <div class="card hidden" id="sd-package-form">
-      <div class="row"><div class="lbl">الرمز <span class="h">إنجليزي بلا مسافات</span></div><input class="mono" style="width:150px" data-sdp="code" placeholder="design30"></div>
-      <div class="row"><div class="lbl">اسم الباقة</div><input style="width:170px" data-sdp="title" placeholder="تصميم يومي 30"></div>
-      <div class="row col"><div class="lbl">الوصف</div><textarea class="wide" data-sdp="description" style="margin-top:6px;min-height:52px" placeholder="30 تصميم + 30 نصاً كتابياً"></textarea></div>
-      <div class="row"><div class="lbl">السعر $</div><input class="num sm" inputmode="decimal" data-sdp="price_usd" placeholder="30"></div>
-      <div class="row"><div class="lbl">عدد التصاميم</div><input class="num sm" type="number" min="1" max="365" data-sdp="total_items" value="30"></div>
-      <div class="row"><div class="lbl">المدة بالأيام</div><input class="num sm" type="number" min="1" max="365" data-sdp="duration_days" value="30"></div>
-      <div class="row"><div class="lbl">وقت الإرسال الافتراضي</div><input class="mono" type="time" data-sdp="send_time" value="20:00"></div>
-      <div class="row"><div class="lbl">تشمل نصاً كتابياً</div><button class="sw on" data-sdp="include_copy"></button></div>
-      <div class="row"><div class="lbl">ظاهرة للعملاء</div><button class="sw on" data-sdp="enabled"></button></div>
-      <div class="formbar" style="position:static;margin:10px -12px -12px"><button class="btn g" onclick="sdClosePackage()">إلغاء</button><button class="btn p" id="sd-save-package" onclick="sdSavePackage()">💾 حفظ الباقة</button></div>
+    <div class="row" style="justify-content:space-between;margin-top:14px">
+      <div class="sec" style="margin:0">🗂️ الاشتراكات</div>
+      <div class="row">
+        <button class="btn g sm" onclick="sdEditPackage(null)">➕ باقة</button>
+        <button class="btn p sm" onclick="sdNewSub()">➕ اشتراك يدوي</button>
+      </div>
     </div>
-    <div class="sec">👥 المشتركون</div>
-    <div class="card">
-      <div class="row"><input class="wide" id="sd-search" placeholder="اسم، @username، ID أو رقم الاشتراك"><button class="btn g sm" onclick="sdLoadSubscribers()">بحث</button></div>
+    <div class="chips" id="sd-tabs" style="margin:10px 0 0">
+      <span class="chip on" data-sd-tab="active">🟢 نشطة</span>
+      <span class="chip" data-sd-tab="paused">⏸️ متوقفة</span>
+      <span class="chip" data-sd-tab="done">🏁 منتهية</span>
     </div>
-    <div class="card" id="sd-subscribers"><div class="empty">جارٍ التحميل…</div></div>
-    <div class="card hidden" id="sd-detail"></div>
-    <div class="sec">📇 دليل المستخدمين القدامى</div>
-    <div class="card">
-      <div class="row"><input class="wide" id="sd-users-search" placeholder="اسم، @username أو Telegram ID"><button class="btn g sm" onclick="sdLoadUsers()">بحث</button></div>
-    </div>
-    <div class="card" id="sd-users"><div class="empty">اضغط بحث لعرض المستخدمين</div></div>
-    <div class="card hidden" id="sd-user-ledger"></div>
+    <div class="row" style="margin-top:10px"><input class="wide" id="sd-search" placeholder="اسم الزبون أو SUB-رقم أو @قناة"><button class="btn g sm" onclick="sdLoadSubs()">بحث</button></div>
+    <div id="sd-form" class="card hidden"></div>
+    <div id="sd-subs"></div>
     <div style="height:70px"></div>
   </section>
+
+  <!-- نافذة باقة -->
+  <div id="sd-package-modal" class="hidden" style="position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:50;display:flex;align-items:center;justify-content:center">
+    <div class="card" style="width:min(92vw,420px);max-height:86vh;overflow:auto">
+      <div class="ctitle" id="sd-pk-title-box">📦 باقة</div>
+      <label class="small">الاسم <input class="wide" id="sd-pk-title"></label>
+      <label class="small">الكود (إنجليزي، لا يتغير بعد الحفظ) <input class="wide" id="sd-pk-code"></label>
+      <div class="row">
+        <label class="small" style="flex:1">السعر $ <input class="wide" id="sd-pk-price" type="number" step="0.01" min="0"></label>
+        <label class="small" style="flex:1">عدد التسليمات اليومية <input class="wide" id="sd-pk-total" type="number" min="1" max="365"></label>
+      </div>
+      <label class="small">الوصف <textarea class="wide" id="sd-pk-desc" style="min-height:54px"></textarea></label>
+      <div class="row"><button class="sw" id="sd-pk-enabled"></button><span class="small">ظاهرة للعملاء في البوت</span></div>
+      <div class="row" style="justify-content:space-between">
+        <button class="btn d sm" id="sd-pk-del" onclick="sdDeletePackage(SDP && SDP.code)">🗑️ حذف الباقة</button>
+        <div class="row"><button class="btn g sm" onclick="sdClosePackage()">إغلاق</button>
+        <button class="btn p sm" onclick="sdSavePackage()">💾 حفظ</button></div>
+      </div>
+    </div>
+  </div>
 
   <!-- ═══ المزيد ═══ -->
   <section id="tab-more" class="hidden">
@@ -727,54 +737,255 @@ async function loadLedger(page=1){
     $("#ledger-pending").textContent=(r.pending_topups?"📥 "+r.pending_topups+" شحنات معلّقة":"لا شحنات معلّقة");
     const box=$("#ledger-list");
     box.innerHTML=r.items.length?r.items.map(x=>{ const n=Number(x.amount_usd)||0, positive=n>=0; const user=(x.user_username?"@"+esc(x.user_username):esc(x.user_name||("ID "+x.user_id))); return `<div class="row" style="align-items:flex-start;cursor:pointer" data-ledger-user="${x.user_id}"><div class="lbl"><b style="color:${positive?'var(--ok)':'var(--bad)'}">${positive?'+':'−'}${money(Math.abs(n))} · ${ledgerLabels[x.type]||esc(x.type)}</b><span class="h">${user} · ID ${x.user_id}${x.note?" · "+esc(x.note):""}</span><span class="h">${x.ref_type||""}${x.ref_id?" #"+x.ref_id:""}${x.admin_id?" · أدمن "+x.admin_id:""} · ${x.created_at?new Date(x.created_at).toLocaleString('ar-SY'):"—"}</span></div><span class="chip">${positive?'داخل':'خارج'}</span></div>`;}).join(""):`<div class="empty">لا توجد حركات مالية ضمن الفلتر.</div>`;
-    $$('[data-ledger-user]',box).forEach(el=>el.onclick=()=>{tab='scheduled'; $$(".tab").forEach(x=>x.classList.toggle("on",x.dataset.tab==='scheduled')); ["home","pricing","pay","services","ledger","scheduled","more"].forEach(t=>$("#tab-"+t).classList.toggle("hidden",t!=='scheduled')); $("#sd-users-search").value=el.dataset.ledgerUser; sdLoadUsers();});
+    $$('[data-ledger-user]',box).forEach(el=>el.onclick=()=>{tab='scheduled'; $$(".tab").forEach(x=>x.classList.toggle("on",x.dataset.tab==='scheduled')); ["home","pricing","pay","services","ledger","scheduled","more"].forEach(t=>$("#tab-"+t).classList.toggle("hidden",t!=='scheduled')); $("#sd-search").value=el.dataset.ledgerUser; SD_TAB="active"; $$("#sd-tabs .chip").forEach(x=>x.classList.toggle("on",x.dataset.sdTab==="active")); sdLoadSubs();});
     const nav=$("#ledger-nav"); nav.innerHTML=""; if(r.pages>1){ if(r.page>1) nav.insertAdjacentHTML('beforeend',`<button class="btn g sm" onclick="loadLedger(${r.page-1})">◀️ السابق</button>`); nav.insertAdjacentHTML('beforeend',`<span class="chip on">${r.page} / ${r.pages}</span>`); if(r.page<r.pages) nav.insertAdjacentHTML('beforeend',`<button class="btn g sm" onclick="loadLedger(${r.page+1})">التالي ▶️</button>`); }
   }catch(e){toast(e.message,true);}
 }
 $$("[data-ledger-period]").forEach(el=>el.addEventListener("click",()=>{ledgerPeriod=el.dataset.ledgerPeriod; $$("[data-ledger-period]").forEach(x=>x.classList.toggle("on",x===el)); loadLedger(1);}));
 
-/* ───────── التصميم اليومي المجدول ───────── */
-let SDP = null, SD_DETAIL = null;
+/* ───────── 🎨 باقة تصميم يومي — طابور الأزواج ───────── */
+let SDP = null, SD_TAB = "active", SD_SUBS = [], SD_OPEN = null;
 const sdMoney = x => money(x || 0);
+const sdStatus = st => ({awaiting_assets:"📝 جديدة",scheduled:"🟢 نشطة",paused:"⏸️ متوقفة",completed:"🏁 مكتملة",cancelled:"🚫 ملغاة",refunded:"↩️ مستردة"}[st]||st);
+const sdBuf = s => ({low:"🔴",warn:"🟡",ok:"🟢"}[s.buffer||"ok"] + " احتياطي " + (s.ready ?? 0));
+
 function renderScheduled() {
   const ps = (S.scheduled && S.scheduled.packages) || [];
   const box = $("#sd-packages");
-  box.innerHTML = ps.length ? ps.map(p => `<div class="row" style="align-items:flex-start"><div class="lbl"><b>${esc(p.title)}</b><span class="h">${esc(p.description || "")} · ${p.total_items} تصميم · ${p.duration_days} يوم · ${esc(p.send_time || "20:00")}</span></div><b>${sdMoney(p.price_usd)}</b><button class="sw ${p.enabled ? "on" : ""}" data-sd-toggle="${esc(p.code)}"></button><button class="btn g sm" data-sd-edit="${esc(p.code)}">✏️</button></div>`).join("") : `<div class="empty">لا توجد باقات بعد — أضف أول باقة من الزر أدناه.</div>`;
+  box.innerHTML = ps.length ? ps.map(p => `<div class="row" style="align-items:flex-start"><div class="lbl"><b>${esc(p.title)}</b><span class="h">${esc(p.description||"")} · ${p.total_items} تصميم · الساعة ${esc(String(p.send_time||"20:00").slice(0,5))} · ${sdMoney(p.price_usd)}</span></div><button class="sw ${p.enabled?"on":""}" data-sd-toggle="${esc(p.code)}"></button><button class="btn g sm" data-sd-edit="${esc(p.code)}">✏️</button></div>`).join("") : `<div class="empty">لا توجد باقات بعد — اضغط «➕ باقة».</div>`;
   $$('[data-sd-toggle]', box).forEach(b => b.addEventListener('click', () => sdToggle(b.dataset.sdToggle, !b.classList.contains('on'))));
   $$('[data-sd-edit]', box).forEach(b => b.addEventListener('click', () => sdEditPackage(b.dataset.sdEdit)));
+  sdLoadSubs();
 }
-function sdPackageForm(p) {
-  SDP = clone(p || {code:"design30", title:"تصميم يومي 30", description:"30 تصميم + 30 نصاً كتابياً", price_usd:"30", total_items:30, duration_days:30, send_time:"20:00", timezone:"Asia/Damascus", include_copy:true, enabled:true});
-  $("#sd-package-form").classList.remove("hidden");
-  $$("[data-sdp]").forEach(el => { const k=el.dataset.sdp, v=SDP[k]; if (el.classList.contains('sw')) { el.classList.toggle('on', !!v); el.onclick=()=>{SDP[k]=!SDP[k]; el.classList.toggle('on', SDP[k]);}; } else { el.value = v == null ? "" : v; el.oninput=()=>{SDP[k]=el.value;}; } });
-  window.scrollTo(0,0);
+
+function sdEditPackage(code) {
+  const p = code ? ((S.scheduled && S.scheduled.packages) || []).find(x => x.code === code) : null;
+  SDP = p ? JSON.parse(JSON.stringify(p)) : {code:"", title:"", price_usd:"", total_items:30, description:"", enabled:true, send_time:"20:00"};
+  $("#sd-pk-title-box").textContent = p ? "✏️ تعديل باقة" : "➕ باقة جديدة";
+  $("#sd-pk-title").value = SDP.title || "";
+  $("#sd-pk-code").value = SDP.code || "";
+  $("#sd-pk-code").disabled = !!p;
+  $("#sd-pk-price").value = SDP.price_usd ?? "";
+  $("#sd-pk-total").value = SDP.total_items || 30;
+  $("#sd-pk-desc").value = SDP.description || "";
+  $("#sd-pk-enabled").classList.toggle("on", !!SDP.enabled);
+  $("#sd-pk-enabled").onclick = () => { SDP.enabled = !SDP.enabled; $("#sd-pk-enabled").classList.toggle("on", SDP.enabled); };
+  $("#sd-pk-del").style.visibility = p ? "visible" : "hidden";
+  $("#sd-package-modal").classList.remove("hidden");
 }
-function sdNewPackage() { sdPackageForm(null); }
-function sdEditPackage(code) { const p=((S.scheduled||{}).packages||[]).find(x=>x.code===code); if(p) sdPackageForm(p); }
-function sdClosePackage() { SDP=null; $("#sd-package-form").classList.add("hidden"); }
 async function sdSavePackage() {
-  if(!SDP) return; const b=$("#sd-save-package"); b.disabled=true;
-  try { const r=await api("scheduled/package/save", SDP); S.scheduled=r.scheduled; sdClosePackage(); renderScheduled(); toast("✅ حُفظت الباقة"); }
-  catch(e){ toast(e.message,true); } b.disabled=false;
+  SDP.title = $("#sd-pk-title").value.trim();
+  SDP.code = $("#sd-pk-code").value.trim();
+  SDP.price_usd = $("#sd-pk-price").value;
+  SDP.total_items = Number($("#sd-pk-total").value || 0);
+  SDP.duration_days = SDP.total_items;
+  SDP.description = $("#sd-pk-desc").value.trim();
+  SDP.send_time = SDP.send_time || "20:00";
+  try { const r = await api("scheduled/package/save", SDP); S.scheduled = r.scheduled; sdClosePackage(); renderScheduled(); toast("✅ حُفظت الباقة"); }
+  catch (e) { toast(e.message, true); }
 }
-async function sdToggle(code, enabled) { try { const r=await api("scheduled/package/toggle",{code,enabled}); S.scheduled=r.scheduled; renderScheduled(); toast(enabled?"✅ أُظهرت الباقة":"⏸️ أُخفيت الباقة"); } catch(e){toast(e.message,true);} }
-async function sdLoadSubscribers() {
-  const q=$("#sd-search").value||""; try { const r=await api("scheduled/subscribers",{q,page:1}); const box=$("#sd-subscribers"); box.innerHTML=r.items.length ? r.items.map(s=>`<div class="row" data-sd-sub="${s.id}" style="cursor:pointer"><div class="lbl"><b>SUB-${s.id} · ${esc(s.package_title)}</b><span class="h">${esc(s.user_name||"")} ${s.user_username?"· @"+esc(s.user_username):""} · ${s.sent_count||0}/${s.total_items}</span></div><span class="chip">${esc({awaiting_assets:"بانتظار المحتوى",scheduled:"مجدولة",paused:"متوقفة",completed:"مكتملة",cancelled:"ملغاة",refunded:"مستردة"}[s.status]||s.status)}</span></div>`).join("") : `<div class="empty">لا توجد اشتراكات مطابقة.</div>`; $$('[data-sd-sub]',box).forEach(x=>x.onclick=()=>sdOpen(Number(x.dataset.sdSub))); } catch(e){toast(e.message,true);}
+async function sdToggle(code, enabled) { try { const r = await api("scheduled/package/toggle", {code, enabled}); S.scheduled = r.scheduled; renderScheduled(); toast(enabled ? "✅ أُظهرت الباقة" : "⏸️ أُخفيت الباقة"); } catch (e) { toast(e.message, true); } }
+async function sdDeletePackage(code) { if (!code || !(await ask("حذف هذه الباقة؟"))) return; try { const r = await api("scheduled/package/delete", {code}); S.scheduled = r.scheduled; sdClosePackage(); renderScheduled(); toast("🗑️ حُذفت الباقة"); } catch (e) { toast(e.message, true); } }
+function sdClosePackage() { SDP = null; $("#sd-package-modal").classList.add("hidden"); }
+
+async function sdLoadSubs() {
+  const q = ($("#sd-search") || {}).value || "";
+  try {
+    const r = await api("scheduled/list", {tab: SD_TAB, q});
+    SD_SUBS = r.items || [];
+    const box = $("#sd-subs");
+    if (!SD_SUBS.length) { box.innerHTML = `<div class="card"><div class="empty">لا توجد اشتراكات هنا — «➕ اشتراك يدوي» أو من البوت.</div></div>`; return; }
+    box.innerHTML = SD_SUBS.map(s => `
+      <div class="card" style="margin-top:10px">
+        <div class="row" style="justify-content:space-between">
+          <div class="lbl">
+            <b>SUB-${s.id} · ${esc(s.package_title || "باقة")}</b>
+            <span class="h">👤 ${esc(s.label || "")} · ${s.target_title ? "📣 " + esc(s.target_title) : "💬 محادثة"} · ⏰ ${esc(String(s.send_time || "").slice(0, 5))} · ${sdStatus(s.status)}</span>
+            <span class="h">📦 ${s.sent_items ?? s.sent_count ?? 0}/${s.total_items} · متبقٍ ${s.remaining} · ${sdBuf(s)}${s.note ? " · 📝 " + esc(s.note) : ""}</span>
+          </div>
+          <div class="row">
+            ${s.status === "scheduled" ? `<button class="btn p sm" onclick="sdAct(${s.id},'send_now')">📤 الآن</button>` : ""}
+            ${(s.status === "scheduled" || s.status === "awaiting_assets") ? `<button class="btn g sm" onclick="sdAct(${s.id},'pause')">⏸️</button>` : ""}
+            ${s.status === "paused" ? `<button class="btn g sm" onclick="sdAct(${s.id},'resume')">▶️</button>` : ""}
+            ${["scheduled","awaiting_assets","paused"].includes(s.status) ? `<button class="btn d sm" onclick="sdCancelSub(${s.id})">↩️ استرداد</button>` : ""}
+            <button class="btn g sm" onclick="sdOpenSub(${s.id})">📂 الطابور</button>
+          </div>
+        </div>
+        <div id="sd-body-${s.id}"></div>
+      </div>`).join("");
+  } catch (e) { toast(e.message, true); }
 }
-async function sdOpen(id) { try { SD_DETAIL=await api("scheduled/detail",{id}); sdRenderDetail(); } catch(e){toast(e.message,true);} }
-function sdRenderDetail() {
-  const s=SD_DETAIL; if(!s) return; const box=$("#sd-detail"); box.classList.remove("hidden");
-  const today=new Date().toLocaleDateString('en-CA'); const time=(s.send_time||"20:00").slice(0,5);
-  let html=`<div class="ctitle">SUB-${s.id} · ${esc(s.package_title)}</div><div class="small">العميل: <b>${esc(s.user_name||"")}</b> ${s.user_username?"· @"+esc(s.user_username):""} · ID <code>${s.user_id}</code><br>الحالة: <b>${esc(s.status)}</b> · المنفذ ${s.sent_count||0}/${s.total_items}</div><div class="row" style="margin-top:8px"><label class="small">تاريخ البداية <input type="date" id="sd-start" value="${s.start_at?String(s.start_at).slice(0,10):today}"></label><label class="small">الساعة <input type="time" id="sd-time" value="${time}"></label></div><div class="row"><button class="btn p sm" onclick="sdActivate(${s.id})">▶️ تفعيل / تحديث الجدولة</button>${s.status==='scheduled'?`<button class="btn g sm" onclick="sdAction(${s.id},'pause')">⏸️ إيقاف</button>`:s.status==='paused'?`<button class="btn g sm" onclick="sdAction(${s.id},'resume')">▶️ استئناف</button>`:""}<button class="btn d sm" onclick="sdAction(${s.id},'cancel')">إلغاء</button><button class="btn g sm" onclick="sdCloseDetail()">إغلاق</button></div><div class="sec">الأزواج اليومية</div>`;
-  html += (s.items||[]).map(i=>`<div class="card" style="margin:8px 0;padding:10px"><div class="row"><b>اليوم ${i.seq}</b><span class="chip">${esc(i.status)}</span></div><div class="small">${i.file_id?"✅ ملف محفوظ":"⚠️ لا يوجد تصميم"}${i.sent_at?" · أُرسل "+new Date(i.sent_at).toLocaleString('ar-SY'):""}</div><input type="file" id="sd-file-${i.seq}" accept="image/*,video/*,.pdf"><textarea class="wide" id="sd-text-${i.seq}" placeholder="النص الكتابي لهذا اليوم" style="margin-top:6px;min-height:52px">${esc(i.copy_text||"")}</textarea><button class="btn g sm" style="margin-top:6px" onclick="sdSaveItem(${s.id},${i.seq},${i.file_id?"true":"false"})">💾 حفظ اليوم ${i.seq}</button></div>`).join("");
-  box.innerHTML=html; window.scrollTo(0,0);
+async function sdLoadUsers() { sdLoadSubs(); }
+
+async function sdOpenSub(id) {
+  try {
+    const s = await api("scheduled/detail", {id});
+    SD_OPEN = s;
+    const box = $("#sd-body-" + id);
+    if (!box) { sdLoadSubs(); return; }
+    box.innerHTML = sdDetailHTML(s);
+    sdFillPhotos(s);
+  } catch (e) { toast(e.message, true); }
 }
-function sdCloseDetail(){ SD_DETAIL=null; $("#sd-detail").classList.add("hidden"); }
-async function sdSaveItem(sid,seq,hasFile){ const file=$("#sd-file-"+seq).files[0], text=$("#sd-text-"+seq).value||""; try { let r; if(file){ const f=new FormData(); f.append('subscription_id',sid); f.append('seq',seq); f.append('copy_text',text); f.append('file',file); r=await apiMultipart('scheduled/upload',f); } else { const old=(SD_DETAIL.items||[]).find(x=>Number(x.seq)===Number(seq)); if(!old||!old.file_id){toast('أرفق ملف التصميم أولاً',true);return;} r=await api('scheduled/content',{subscription_id:sid,seq,file_kind:old.file_kind,file_id:old.file_id,copy_text:text}); } SD_DETAIL=await api('scheduled/detail',{id:sid}); sdRenderDetail(); toast('✅ حُفظ التصميم والنص'); } catch(e){toast(e.message,true);} }
-async function sdActivate(id){ try { const r=await api('scheduled/activate',{id,start_date:$("#sd-start").value,send_time:$("#sd-time").value}); SD_DETAIL=r.subscription; sdRenderDetail(); toast('✅ فُعّلت الجدولة'); } catch(e){toast(e.message,true);} }
-async function sdAction(id,action){ if(action==='cancel' && !(await ask('إلغاء هذه الباقة؟'))) return; try { const r=await api('scheduled/action',{id,action}); SD_DETAIL=r.subscription; sdRenderDetail(); sdLoadSubscribers(); toast('✅ تم التحديث'); } catch(e){toast(e.message,true);} }
-async function sdLoadUsers(){ const q=$("#sd-users-search").value||""; try { const r=await api('users/directory',{q,page:1}); const box=$("#sd-users"); box.innerHTML=r.items.length?r.items.map(u=>`<div class="row" data-sd-user="${u.tg_id}" style="cursor:pointer"><div class="lbl"><b>${esc(u.name||"بدون اسم")}</b><span class="h">${u.username?"@"+esc(u.username):"بدون @username"} · ID ${u.tg_id} · آخر ظهور ${u.last_seen?new Date(u.last_seen).toLocaleString('ar-SY'):"—"}</span></div><span class="chip">رصيد ${sdMoney(u.balance_usd)}</span></div>`).join(""):`<div class="empty">لا يوجد مستخدمون مطابقون.</div>`; $$('[data-sd-user]',box).forEach(x=>x.onclick=()=>sdShowLedger(Number(x.dataset.sdUser))); } catch(e){toast(e.message,true);} }
-async function sdShowLedger(uid){ try { const r=await api('users/ledger',{user_id:uid}); const b=$("#sd-user-ledger"); b.classList.remove('hidden'); const labels={topup:'إيداع',order_charge:'خصم طلب',refund:'استرداد',referral:'إحالة',adjustment:'تعديل'}; b.innerHTML=`<div class="ctitle">🧾 السجل المالي · ${esc(r.user.name||'')} · ID ${r.user.tg_id}</div><div class="row"><b>الرصيد الحالي</b><b>${sdMoney(r.user.balance_usd)}</b></div>`+(r.rows.length?r.rows.map(x=>`<div class="row"><div class="lbl"><b>${Number(x.amount_usd)>=0?'+':'−'}${sdMoney(Math.abs(Number(x.amount_usd)))} · ${labels[x.type]||esc(x.type)}</b><span class="h">${esc(x.note||'')} · ${x.created_at?new Date(x.created_at).toLocaleString('ar-SY'):''}${x.admin_id?' · أدمن '+x.admin_id:''}</span></div><span class="small">${x.ref_type||''}${x.ref_id?' #'+x.ref_id:''}</span></div>`).join(''):`<div class="empty">لا توجد حركات مالية.</div>`); window.scrollTo(0,document.body.scrollHeight); } catch(e){toast(e.message,true);} }
+
+function sdDetailHTML(s) {
+  const items = s.items || [];
+  const nextSeq = Math.max(0, ...items.map(i => Number(i.seq) || 0)) + 1;
+  const done = (s.sent_items ?? s.sent_count ?? 0);
+  return `
+  <div style="border-top:1px solid #ffffff22;margin-top:10px;padding-top:10px">
+    <div class="row"><label class="small" style="flex:1">اسم العميل <input class="wide" id="sd-e-name" value="${esc(s.customer_name || "")}"></label>
+    <label class="small" style="flex:1">عنوان الباقة <input class="wide" id="sd-e-title" value="${esc(s.package_title || "")}"></label></div>
+    <div class="row">
+      <label class="small" style="flex:1">الوجه: @username الزبون أو @channel (فارغ = بدون وجه) <input class="wide" id="sd-e-target" value="${esc(s.target_chat_id || "")}"></label>
+      <label class="small">الساعة <input type="time" id="sd-e-time" value="${esc(String(s.send_time || "20:00").slice(0, 5))}"></label>
+      <label class="small">إجمالي التسليمات <input type="number" id="sd-e-total" min="${done}" max="730" value="${s.total_items}"></label>
+    </div>
+    <label class="small">ملاحظة داخلية <input class="wide" id="sd-e-note" value="${esc(s.note || "")}"></label>
+    <div class="row" style="justify-content:space-between">
+      <div class="row"><button class="btn p sm" onclick="sdSaveMeta(${s.id})">💾 حفظ البيانات</button>
+      <input type="number" id="sd-ext" min="1" max="365" value="30" style="width:74px">
+      <button class="btn g sm" onclick="sdExtend(${s.id})">➕ تمديد المتبقٍ له</button></div>
+      <span class="small">استرداد الإلغاء: <b>${sdMoney(s.refund_quote || 0)}</b> (نسبي بالمتبقٍ)</span>
+    </div>
+    <div class="sec">🧰 إضافة/تعديل زوج (🖼️ تصميم + ✍️ نصه)</div>
+    <div class="card" style="padding:10px">
+      <div class="row">
+        <label class="small">المسلسل <input type="number" id="sd-p-seq" min="1" value="${nextSeq}" style="width:74px"></label>
+        <label class="small" style="flex:1">ملف التصميم (صورة/PDF…) <input type="file" id="sd-p-file" accept="image/*,video/*,.pdf"></label>
+      </div>
+      <textarea class="wide" id="sd-p-copy" placeholder="النص (caption) المصاحب للتصميم — حتى 1024 حرف" style="min-height:56px"></textarea>
+      <div class="row" style="justify-content:flex-end"><span class="small">بلا ملف = تعديل نص زوج قائم</span><button class="btn p sm" onclick="sdSavePair(${s.id})">💾 حفظ الزوج</button></div>
+    </div>
+    ${items.length ? items.map(i => `
+      <div class="card" style="padding:10px;margin-top:8px">
+        <div class="row" style="align-items:flex-start">
+          <img id="sd-img-${i.seq}" alt="" style="width:64px;height:64px;object-fit:cover;border-radius:10px;background:#ffffff14;${i.file_id ? "" : "display:none"}">
+          <div class="lbl" style="flex:1">
+            <b>زوج ${i.seq} · ${sdStatus(i.status)}</b>
+            <span class="h">${i.file_id ? "🖼️ تصميم محفوظ" : "⚠️ بلا ملف"}${i.sent_at ? " · أُرسل " + new Date(i.sent_at).toLocaleString("ar-SY") : ""}${Number(i.attempts) > 1 ? " · محاولات " + i.attempts : ""}${i.last_error ? " · ❌ " + esc(String(i.last_error).slice(0, 80)) : ""}</span>
+            <span class="h">${esc((i.copy_text || "").slice(0, 140)) || "— بلا نص —"}</span>
+          </div>
+          ${i.status !== "sent" ? `<div class="row">
+            <button class="btn g sm" onclick="sdFillPair(${s.id},${i.seq})">✏️</button>
+            <button class="btn d sm" onclick="sdDelPair(${s.id},${i.seq})">🗑️</button></div>` : `<div class="row"><span class="chip">✅ سُلّم</span>${i.sent_message_id ? `<button class="btn d sm" onclick="sdDelMsg(${s.id},${i.seq})">🧽 حذف الرسالة من الوجه</button>` : ""}</div>`}
+        </div>
+      </div>`).join("") : `<div class="empty">الطابور فارغ — أضف أول زوج (تصميم + نصه).</div>`}
+  </div>`;
+}
+
+async function sdFillPhotos(s) {
+  for (const i of (s.items || [])) {
+    if (!i.file_id) continue;
+    const img = document.getElementById("sd-img-" + i.seq);
+    if (!img || img.src) continue;
+    try {
+      const r = await fetch("/cpanel/api/scheduled/photo?sub=" + s.id + "&seq=" + i.seq, {headers: {"X-Telegram-Init-Data": initData}});
+      if (r.ok) img.src = URL.createObjectURL(await r.blob());
+    } catch (e) {}
+  }
+}
+
+async function sdSaveMeta(id) {
+  try {
+    await api("scheduled/update", {id,
+      user: $("#sd-e-name").value, package_title: $("#sd-e-title").value,
+      target_ref: $("#sd-e-target").value, send_time: $("#sd-e-time").value,
+      total_items: Number($("#sd-e-total").value || 0), note: $("#sd-e-note").value});
+    toast("✅ حُفظت البيانات"); sdLoadSubs(); sdOpenSub(id);
+  } catch (e) { toast(e.message, true); }
+}
+async function sdExtend(id) {
+  const n = Number($("#sd-ext").value || 0);
+  if (n < 1) return toast("أدخل عدداً صحيحاً", true);
+  try { await api("scheduled/action", {id, action: "extend", add_count: n}); toast("➕ مُدّد «المتبقٍ له»"); sdLoadSubs(); sdOpenSub(id); }
+  catch (e) { toast(e.message, true); }
+}
+async function sdAct(id, action) {
+  try {
+    const r = await api("scheduled/action", {id, action});
+    if (action === "send_now") toast(({sent:"📤 أُرسل الزوج الآن", empty:"⚠️ الطابور فارغ — أضف أزواجاً", blocked:"🚫 تعذّر الإرسال (الوجه حظر البوت؟)", error:"❌ خطأ في الإرسال", skip:"تم"})[r.delivery] || "تم");
+    else toast("✅ تم التحديث");
+    sdLoadSubs(); if (SD_OPEN && SD_OPEN.id === id) sdOpenSub(id);
+  } catch (e) { toast(e.message, true); }
+}
+async function sdCancelSub(id) {
+  if (!(await ask(`إلغاء SUB-${id} واسترداد قيمة الأيام غير المنفذة إلى رصيد العميل؟`))) return;
+  try { const r = await api("scheduled/action", {id, action: "cancel"}); toast(`↩️ أُلغي واستُرد ${sdMoney(r.refund || 0)}`); sdLoadSubs(); const b = $("#sd-body-" + id); if (b) b.innerHTML = ""; }
+  catch (e) { toast(e.message, true); }
+}
+async function sdSavePair(id) {
+  const seq = Number($("#sd-p-seq").value || 0);
+  const copy = $("#sd-p-copy").value;
+  const fi = $("#sd-p-file");
+  const file = fi && fi.files ? fi.files[0] : null;
+  try {
+    if (file) {
+      const f = new FormData(); f.append("id", id); f.append("seq", seq); f.append("copy", copy); f.append("file", file);
+      await apiMultipart("scheduled/pair/upload", f);
+    } else { await api("scheduled/pair/text", {id, seq, copy}); }
+    toast("✅ حُفظ الزوج"); sdOpenSub(id);
+  } catch (e) { toast(e.message, true); }
+}
+function sdFillPair(id, seq) {
+  const i = ((SD_OPEN && SD_OPEN.id === id ? SD_OPEN.items : []) || []).find(x => Number(x.seq) === Number(seq));
+  if (!i) return;
+  $("#sd-p-seq").value = seq;
+  $("#sd-p-copy").value = i.copy_text || "";
+  $("#sd-p-copy").focus();
+}
+async function sdDelPair(id, seq) {
+  if (!(await ask(`حذف الزوج ${seq} من الطابور؟`))) return;
+  try { await api("scheduled/pair/delete", {id, seq}); toast("🗑️ حُذف الزوج"); sdOpenSub(id); }
+  catch (e) { toast(e.message, true); }
+}
+async function sdDelMsg(id, seq) {
+  if (!(await ask(`حذف رسالة الزوج ${seq} من وجه الاشتراك (القناة/المحادثة)؟ المنشور سيختفي من هناك نهائياً.`))) return;
+  try { await api("scheduled/action", {id, action: "delete_msg", seq}); toast("🧽 حُذفت الرسالة من الوجه"); sdOpenSub(id); }
+  catch (e) { toast(e.message, true); }
+}
+
+function sdNewSub() {
+  const box = $("#sd-form");
+  box.classList.remove("hidden");
+  box.innerHTML = `
+    <div class="ctitle">➕ اشتراك يدوي (دفع برّا البوت — بلا خصم من الرصيد)</div>
+    <div class="row"><label class="small" style="flex:1">اسم الزبون <input class="wide" id="sd-n-user" placeholder="مثال: أبو أحمد"></label>
+    <label class="small" style="flex:1">الوجه: @username الزبون أو @channel/رقم القناة <input class="wide" id="sd-n-target" placeholder="@username أو @mychannel"></label></div>
+    <div class="row">
+      <label class="small">عدد التسليمات «المتبقٍ له» <input type="number" id="sd-n-total" min="1" max="365" value="30"></label>
+      <label class="small">الساعة <input type="time" id="sd-n-time" value="20:00"></label>
+      <label class="small" style="flex:1">عنوان الباقة <input class="wide" id="sd-n-title" placeholder="باقة تصميم يومي"></label>
+    </div>
+    <div class="row">
+      <label class="small" style="flex:1">ملاحظة <input class="wide" id="sd-n-note"></label>
+      <label class="small">سعر مرجعي $ (توثيق فقط) <input type="number" id="sd-n-price" step="0.01" min="0" value="0" style="width:120px"></label>
+    </div>
+    <div class="row" style="justify-content:flex-end">
+      <button class="btn g sm" onclick="$('#sd-form').classList.add('hidden')">إلغاء</button>
+      <button class="btn p sm" onclick="sdCreateSub()">💾 إنشاء</button>
+    </div>`;
+  window.scrollTo(0, 0);
+}
+async function sdCreateSub() {
+  try {
+    await api("scheduled/create", {
+      user: $("#sd-n-user").value, target_ref: $("#sd-n-target").value,
+      total_items: Number($("#sd-n-total").value || 0), send_time: $("#sd-n-time").value,
+      package_title: $("#sd-n-title").value, note: $("#sd-n-note").value, price_ref: $("#sd-n-price").value});
+    $("#sd-form").classList.add("hidden");
+    toast("✅ أُنشئ الاشتراك — ارفع الأزواج (🖼️+✍️) من بطاقته");
+    SD_TAB = "active";
+    $$("#sd-tabs .chip").forEach(x => x.classList.toggle("on", x.dataset.sdTab === "active"));
+    sdLoadSubs();
+  } catch (e) { toast(e.message, true); }
+}
+$$("#sd-tabs .chip").forEach(el => el.addEventListener("click", () => {
+  SD_TAB = el.dataset.sdTab;
+  $$("#sd-tabs .chip").forEach(x => x.classList.toggle("on", x === el));
+  sdLoadSubs();
+}));
+
 async function apiMultipart(path, form){ const r=await fetch('/cpanel/api/'+path,{method:'POST',headers:{'X-Telegram-Init-Data':initData},body:form}); let d={}; try{d=await r.json();}catch(e){} if(!r.ok){const er=new Error(d.message||('خطأ '+r.status));er.code=d.error||r.status;throw er;} return d; }
 
 /* ───────── partner channels ───────── */
