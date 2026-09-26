@@ -904,7 +904,7 @@ async function sdExtend(id) {
 async function sdAct(id, action) {
   try {
     const r = await api("scheduled/action", {id, action});
-    if (action === "send_now") toast(({sent:"📤 أُرسل الزوج الآن", empty:"⚠️ الطابور فارغ — أضف أزواجاً", blocked:"🚫 تعذّر الإرسال (الوجه حظر البوت؟)", error:"❌ خطأ في الإرسال", skip:"تم"})[r.delivery] || "تم");
+    if (action === "send_now") toast(({sent:"📤 أُرسل الزوج الآن", empty:"⚠️ لا زوج جاهز — تأكد أن كل زوج يحمل ملف تصميم (🖼️) ونصه (✍️)", blocked:"🚫 تعذّر الإرسال — تأكد أن البوت مشرف في القناة بصلاحية «نشر الرسائل»", error:"❌ خطأ في الإرسال", skip:"تم"})[r.delivery] || "تم");
     else toast("✅ تم التحديث");
     sdLoadSubs(); if (SD_OPEN && SD_OPEN.id === id) sdOpenSub(id);
   } catch (e) { toast(e.message, true); }

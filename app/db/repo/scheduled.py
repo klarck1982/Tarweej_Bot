@@ -275,6 +275,7 @@ async def claim_next_pair(subscription_id: int) -> dict | None:
         WHERE id = (
             SELECT id FROM scheduled_subscription_items
             WHERE subscription_id=$1
+              AND file_id IS NOT NULL
               AND (status='pending' OR (status='sending' AND updated_at < now() - interval '15 minutes'))
             ORDER BY seq LIMIT 1
             FOR UPDATE SKIP LOCKED
