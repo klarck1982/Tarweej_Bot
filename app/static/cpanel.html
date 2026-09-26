@@ -746,7 +746,7 @@ $$("[data-ledger-period]").forEach(el=>el.addEventListener("click",()=>{ledgerPe
 /* ───────── 🎨 باقة تصميم يومي — طابور الأزواج ───────── */
 let SDP = null, SD_TAB = "active", SD_SUBS = [], SD_OPEN = null;
 const sdMoney = x => money(x || 0);
-const sdStatus = st => ({awaiting_assets:"📝 جديدة",scheduled:"🟢 نشطة",paused:"⏸️ متوقفة",completed:"🏁 مكتملة",cancelled:"🚫 ملغاة",refunded:"↩️ مستردة"}[st]||st);
+const sdStatus = st => ({awaiting_assets:"📝 بانتظار المحتوى",scheduled:"🟢 نشطة",paused:"⏸️ متوقفة",completed:"🏁 مكتملة",cancelled:"🚫 ملغاة",refunded:"↩️ مستردة"}[st]||st);
 const sdBuf = s => ({low:"🔴",warn:"🟡",ok:"🟢"}[s.buffer||"ok"] + " احتياطي " + (s.ready ?? 0));
 
 function renderScheduled() {
@@ -804,7 +804,8 @@ async function sdLoadSubs() {
             <span class="h">📦 ${s.sent_items ?? s.sent_count ?? 0}/${s.total_items} · متبقٍ ${s.remaining} · ${sdBuf(s)}${s.note ? " · 📝 " + esc(s.note) : ""}</span>
           </div>
           <div class="row">
-            ${s.status === "scheduled" ? `<button class="btn p sm" onclick="sdAct(${s.id},'send_now')">📤 الآن</button>` : ""}
+            ${(s.status === "scheduled" || s.status === "awaiting_assets") ? `<button class="btn p sm" onclick="sdAct(${s.id},'send_now')">📤 الآن</button>` : ""}
+            ${s.status === "awaiting_assets" ? `<button class="btn p sm" onclick="sdAct(${s.id},'activate')" title="ابدأ التسليم اليومي">▶️</button>` : ""}
             ${(s.status === "scheduled" || s.status === "awaiting_assets") ? `<button class="btn g sm" onclick="sdAct(${s.id},'pause')">⏸️</button>` : ""}
             ${s.status === "paused" ? `<button class="btn g sm" onclick="sdAct(${s.id},'resume')">▶️</button>` : ""}
             ${["scheduled","awaiting_assets","paused"].includes(s.status) ? `<button class="btn d sm" onclick="sdCancelSub(${s.id})">↩️ استرداد</button>` : ""}
@@ -843,11 +844,12 @@ function sdDetailHTML(s) {
     </div>
     <label class="small">ملاحظة داخلية <input class="wide" id="sd-e-note" value="${esc(s.note || "")}"></label>
     <div class="row" style="justify-content:space-between">
-      <div class="row"><button class="btn p sm" onclick="sdSaveMeta(${s.id})">💾 حفظ البيانات</button>
+      <div class="row">${s.status === "awaiting_assets" ? `<button class="btn p sm" onclick="sdAct(${s.id},'activate')">▶️ تفعيل وبدء الجدولة</button>` : ""}<button class="btn p sm" onclick="sdSaveMeta(${s.id})">💾 حفظ البيانات</button>
       <input type="number" id="sd-ext" min="1" max="365" value="30" style="width:74px">
       <button class="btn g sm" onclick="sdExtend(${s.id})">➕ تمديد المتبقٍ له</button></div>
       <span class="small">استرداد الإلغاء: <b>${sdMoney(s.refund_quote || 0)}</b> (نسبي بالمتبقٍ)</span>
     </div>
+    ${s.status === "awaiting_assets" ? `<div class="card" style="padding:10px;margin-top:8px;background:#ffffff10"><span class="small">⏳ الاشتراك <b>بانتظار المحتوى</b> — ارفع الأزواج (🖼️+✍️) ثم اضغط <b>«▶️ تفعيل وبدء الجدولة»</b> لتبدأ التسليمات اليومية في الساعة المحددة. حتى ذلك يمكنك «📤 الآن» للتجربة على القناة بلا بدء الساعة.</span></div>` : ""}
     <div class="sec">🧰 إضافة/تعديل زوج (🖼️ تصميم + ✍️ نصه)</div>
     <div class="card" style="padding:10px">
       <div class="row">

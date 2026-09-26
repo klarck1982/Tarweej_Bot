@@ -361,6 +361,8 @@ async def scheduled_action(request: web.Request) -> web.Response:
             sub = await SD.pause(sid)
         elif action == "resume":
             sub = await SD.resume(sid)
+        elif action == "activate":
+            sub = await SD.activate(sid)
         elif action == "send_now":
             status, _info = await SD.deliver_next(bot, sid, manual=True)
             await CP.audit(user["id"], "scheduled", f"subscription.{sid}.send_now", None, status)
