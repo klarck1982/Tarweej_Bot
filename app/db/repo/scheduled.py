@@ -252,6 +252,24 @@ async def set_sent_message(item_id: int, message_id: int | None) -> None:
         item_id, int(message_id) if message_id is not None else None)
 
 
+async def requeue_failed_pair(subscription_id: int) -> dict | None:
+    """إحياء أقدم زوج فاشل (failed → pending) لمحاولة يدوية واحدة — بلا تصفير المحاولات."""
+    return _row(await db.fetchrow(
+        "UPDATE scheduled_subscription_items SET status='pending', updated_at=now() "
+        "WHERE id = (SELECT id FROM scheduled_subscription_items "
+        "WHERE subscription_id=$1 AND status='failed' ORDER BY seq LIMIT 1) "
+        "RETURNING *",
+        subscription_id))
+
+
+async def reset_pair(subscription_id: int, seq: int) -> dict | None:
+    """إعادة زوج فاشل إلى الطابور بمحاولات صفرية (بعد إعادة حفظه يدوياً بمحتوى جديد)."""
+    return _row(await db.fetchrow(
+        "UPDATE scheduled_subscription_items SET status='pending', attempts=0, last_error=NULL, updated_at=now() "
+        "WHERE subscription_id=$1 AND seq=$2 AND status='failed' RETURNING *",
+        subscription_id, int(seq)))
+
+
 async def set_pair_text(subscription_id: int, seq: int, copy_text: str) -> dict | None:
     row = await db.fetchrow(
         "UPDATE scheduled_subscription_items SET copy_text=$3, updated_at=now() "
@@ -275,7 +293,7 @@ async def claim_next_pair(subscription_id: int) -> dict | None:
         WHERE id = (
             SELECT id FROM scheduled_subscription_items
             WHERE subscription_id=$1
-              AND file_id IS NOT NULL
+              AND file_id IS NOT NULL AND file_id <> ''
               AND (status='pending' OR (status='sending' AND updated_at < now() - interval '15 minutes'))
             ORDER BY seq LIMIT 1
             FOR UPDATE SKIP LOCKED

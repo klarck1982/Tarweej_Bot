@@ -476,11 +476,26 @@ def make_scheduled_pair_upload(bot: Bot):
             existing = next((i for i in (sub.get("items") or []) if int(i.get("seq") or 0) == seq), None)
             if existing and existing.get("status") == "sent":
                 return _json({"error": "invalid", "message": "هذا الزوج سُلّم بالفعل — لا يُعدَّل"}, 400)
-            kind = "photo" if str(filename).lower().endswith(("png", "jpg", "jpeg", "webp", "gif")) else "document"
+            # النوع المحفوظ يطابق طريقة الرفع تماماً: file_id الصورة لا يعمل مع
+            # send_document والعكس (هذا الخلل كان سبب «خطأ في الإرسال» للأزواج المرفوعة من Cpanel).
+            is_photo = str(filename).lower().endswith((".png", ".jpg", ".jpeg", ".webp"))
+            up_caption = f"📦 رفع زوج تصميم SUB-{sid} · تسلسل {seq}"
             # الرفع إلى تيليغرام (للحصول على file_id) — كل فشل هنا بسبب واضح وقابل للعلاج
             try:
-                msg = await bot.send_document(user["id"], BufferedInputFile(data, filename=filename),
-                                              caption=f"📦 رفع زوج تصميم SUB-{sid} · تسلسل {seq}")
+                if is_photo:
+                    msg = await bot.send_photo(user["id"], BufferedInputFile(data, filename=filename),
+                                               caption=up_caption)
+                    file_id = msg.photo[-1].file_id if msg.photo else None
+                    kind = "photo"
+                else:
+                    msg = await bot.send_document(user["id"], BufferedInputFile(data, filename=filename),
+                                                  caption=up_caption)
+                    file_id = (msg.document.file_id if msg.document else None) or \
+                              (msg.photo[-1].file_id if msg.photo else None)
+                    kind = "document" if msg.document else "photo"
+                if not file_id:
+                    return _json({"error": "server",
+                                  "message": "تيليغرام لم يرجع معرّفاً للملف — أعد المحاولة."}, 502)
             except TelegramForbiddenError:
                 return _json({"error": "no_dm",
                               "message": "تعذّر الإرسال إلى خاصّك — افتح محادثة البوت واضغط Start ثم أعد الرفع."}, 400)
@@ -493,13 +508,6 @@ def make_scheduled_pair_upload(bot: Bot):
             except TelegramBadRequest as e:
                 return _json({"error": "rejected",
                               "message": f"تيليغرام رفض الملف ({e.message}) — جرّب صيغة أو حجماً آخر."}, 400)
-            doc = msg.document
-            if doc is None and msg.photo:
-                doc = msg.photo[-1]
-                kind = "photo"
-            if doc is None:
-                return _json({"error": "server", "message": "تيليغرام لم يرجع معرّفاً للملف — أعد المحاولة."}, 502)
-            file_id = doc.file_id
             try:
                 await bot.delete_message(user["id"], msg.message_id)
             except Exception:  # noqa: BLE001

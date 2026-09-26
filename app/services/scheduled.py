@@ -23,7 +23,7 @@ from decimal import Decimal, InvalidOperation
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from aiogram.exceptions import TelegramForbiddenError
+from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
 
 from app.db import pool as db
 from app.db.repo import scheduled as repo
@@ -620,7 +620,9 @@ async def save_pair(subscription_id: int, seq: int, *, copy: str | None = None,
         return None, "نوع الملف غير صالح"
     item = await repo.get_item(subscription_id, int(seq))
     if item is None:
-        kind, file_id = photo or ("photo", "")
+        if photo is None:
+            return None, "أرفق ملف التصميم أولاً — لا يمكن إنشاء زوج بلا ملف"
+        kind, file_id = photo
         item = await repo.put_item(subscription_id, int(seq), kind, file_id, text or "")
     else:
         if item.get("status") == "sent":
@@ -635,6 +637,8 @@ async def save_pair(subscription_id: int, seq: int, *, copy: str | None = None,
                                   fields.get("file_id", item.get("file_id") or ""),
                                   fields.get("copy_text", item.get("copy_text") or ""))
         item = upd or item
+        if item.get("status") == "failed":
+            item = await repo.reset_pair(subscription_id, int(seq)) or item
     if item is None:
         return None, "تعذر حفظ الزوج"
     return item, None
@@ -713,6 +717,11 @@ async def deliver_next(bot, subscription_id: int, *, manual: bool = False) -> tu
     if sub["status"] not in ("scheduled", "paused") and not manual:
         return "skip", sub
     item = await repo.claim_next_pair(subscription_id)
+    if not item and manual:
+        # إصرار يدوي («الآن»): إحياء أقدم زوج فاشل ومحاولة إرساله مرة واحدة.
+        # (الحلقة التلقائية لا تحيي الفاشل أبداً لتفادي حلقات الفشل.)
+        if await repo.requeue_failed_pair(subscription_id):
+            item = await repo.claim_next_pair(subscription_id)
     if not item:
         return "empty", sub
     target = sub.get("target_chat_id") or sub.get("user_id")
@@ -727,11 +736,18 @@ async def deliver_next(bot, subscription_id: int, *, manual: bool = False) -> tu
         caption = _esc(item.get("copy_text")) or None
         kind = item.get("file_kind")
         fid = item.get("file_id")
-        if kind == "photo":
-            msg = await bot.send_photo(int(target), fid, caption=caption)
-        elif kind == "video":
-            msg = await bot.send_video(int(target), fid, caption=caption)
-        else:
+        try:
+            if kind == "photo":
+                msg = await bot.send_photo(int(target), fid, caption=caption)
+            elif kind == "video":
+                msg = await bot.send_video(int(target), fid, caption=caption)
+            else:
+                msg = await bot.send_document(int(target), fid, caption=caption)
+        except TelegramBadRequest:
+            # أزواج قديمة حُفظت بنوع مخالف لنوع file_id (رفع Cpanel كان يرسل الكل
+            # كمستند ويحفظه photo): إعادة المحاولة كمستند قبل إعلان الفشل.
+            if kind == "document":
+                raise
             msg = await bot.send_document(int(target), fid, caption=caption)
     except TelegramForbiddenError as e:
         await repo.mark_failed(item["id"], subscription_id, str(e), retry=False)
