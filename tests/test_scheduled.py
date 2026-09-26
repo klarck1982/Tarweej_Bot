@@ -70,6 +70,13 @@ def test_refund_quote_edge_cases():
 
 # ══════════════════════════════ تحقق الباقات ══════════════════════════════
 
+def _async(value):
+    """يعيد دالة غير متزامنة تعيد القيمة — لتزييف دوال repo."""
+    async def _c(*_a, **_k):
+        return value
+    return _c
+
+
 def _pkg_data(**over):
     base = {"code": "plan_a", "title": "باقة 30 تصميماً", "description": "وصف",
             "price_usd": "30", "total_items": "30", "send_time": "20:00",
@@ -378,3 +385,53 @@ def test_run_due_is_thin(monkeypatch):
     n = run(SD.run_due(None, limit=3))
     assert n == 1
     assert sent_calls == [7, 8], "يمر على المستحق بالترتيب ويتوقف عند الفراغ"
+
+
+# ── تفعيل اشتراك «بانتظار المحتوى» ──
+def test_activate_requires_pairs_then_starts_schedule(monkeypatch):
+    """لا تفعيل بلا زوج جاهز — وبعده تصبح scheduled وموعدها محسوب."""
+    sub = {"id": 7, "status": "awaiting_assets", "send_time": "20:00",
+           "timezone_name": "Asia/Damascus", "ready_items": 0, "next_send_at": None}
+    monkeypatch.setattr(SD.repo, "get_subscription", _async(dict(sub)))
+
+    # (1) بلا أزواج → رفض
+    try:
+        run(SD.activate(7))
+        raise AssertionError("يجب أن يُرفض التفعيل بلا أزواج")
+    except ValueError as e:
+        assert "زوجاً" in str(e)
+
+    # (2) بعد رفع زوج → يُفعّل ويُحسب الموعد
+    sub2 = dict(sub, ready_items=2)
+    monkeypatch.setattr(SD.repo, "get_subscription", _async(dict(sub2)))
+    monkeypatch.setattr(SD.repo, "set_status", _async({"id": 7, "status": "scheduled",
+                                                       "send_time": "20:00",
+                                                       "timezone_name": "Asia/Damascus"}))
+    saved = {}
+
+    async def fake_update_fields(sid, **fields):
+        saved.update(fields)
+        return {"id": sid}
+
+    monkeypatch.setattr(SD.repo, "update_fields", fake_update_fields)
+    out = run(SD.activate(7))
+    assert out["status"] == "awaiting_assets"      # التزييف لا يغيّر الحالة
+    assert "next_send_at" in saved and saved["next_send_at"] is not None
+    assert saved.get("next_send_at") > datetime.now(timezone.utc), "الموعد يجب أن يكون مستقبلياً"
+
+    # (3) حالة نهائية → رفض
+    sub3 = dict(sub, ready_items=3, status="completed")
+    monkeypatch.setattr(SD.repo, "get_subscription", _async(dict(sub3)))
+    try:
+        run(SD.activate(7))
+        raise AssertionError("يجب رفض تفعيل اشتراك مكتمل")
+    except ValueError:
+        pass
+
+
+def test_activate_idempotent_when_already_scheduled(monkeypatch):
+    sub = {"id": 9, "status": "scheduled", "send_time": "20:00",
+           "timezone_name": "Asia/Damascus", "ready_items": 4}
+    monkeypatch.setattr(SD.repo, "get_subscription", _async(dict(sub)))
+    out = run(SD.activate(9))
+    assert out["status"] == "scheduled"
