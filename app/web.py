@@ -45,7 +45,17 @@ async def index(_: web.Request) -> web.Response:
 
 
 def make_app() -> web.Application:
-    app = web.Application()
+    # حد جسم الطلب 24MB: صور Cpanel حتى 20MB (الافتراضي 1MB فقط — كان يرفض أي تصميم حقيقي
+    # بخطأ HTTPRequestEntityTooLarge قبل وصوله للمعالج). الـ413 تُرجَع JSON ليفهمها الفرونت.
+    app = web.Application(middlewares=[_json_413], client_max_size=24 * 1024 * 1024)
     app.router.add_get("/", index)
     app.router.add_get("/health", health)  # aiohttp يرد على HEAD تلقائياً (UptimeRobot)
     return app
+
+
+@web.middleware
+async def _json_413(request: web.Request, handler) -> web.StreamResponse:
+    try:
+        return await handler(request)
+    except web.HTTPRequestEntityTooLarge:
+        return web.json_response({"error": "too_large", "message": "الملف أكبر من 20MB."}, status=413)

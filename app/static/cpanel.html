@@ -923,6 +923,7 @@ async function sdSavePair(id) {
   const file = fi && fi.files ? fi.files[0] : null;
   try {
     if (file) {
+      if (file.size > 20*1024*1024) { toast("الملف أكبر من 20MB — صغّره ثم أعد الرفع.", true); return; }
       const f = new FormData(); f.append("id", id); f.append("seq", seq); f.append("copy", copy); f.append("file", file);
       await apiMultipart("scheduled/pair/upload", f);
     } else { await api("scheduled/pair/text", {id, seq, copy}); }
