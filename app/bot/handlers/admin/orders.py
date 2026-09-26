@@ -148,6 +148,21 @@ async def cb_refund(cb: CallbackQuery, state: FSMContext) -> None:
     if not o or o["status"] in repo.FINAL_STATUSES or o["status"] == "awaiting_payment":
         await cb.answer("هذا الطلب مغلق", show_alert=True)
         return
+    # 🛡️ طلبات الاشتراك المجدول: لا استرداد عام (كان يسترد السعر كاملاً والخدمة تستمر)
+    # — الإلغاء والاسترداد النسبي حصراً عبر services.scheduled.cancel
+    if (o.get("spec") or {}).get("scheduled_subscription"):
+        await state.clear()
+        sid = o.get("scheduled_subscription_id")
+        from app.services import scheduled as SD
+        _sub, refund = await SD.cancel(int(sid), admin_id=cb.from_user.id)
+        txt = (f"↩️ أُلغي اشتراك التصميم SUB-{sid} واستُرد <b>{fmt(refund)}</b> للعميل (نسبي بالمتباقي)"
+               if refund > 0 else f"↩️ أُلغي اشتراك التصميم SUB-{sid} (لا مال بالبوت)")
+        await cb.answer(txt, show_alert=True)
+        try:
+            await cb.message.edit_text(txt)
+        except Exception:  # noqa: BLE001
+            pass
+        return
     await C.ask_input(cb, state, AdminOrder.refund_reason, {"oid": oid},
                       T.ADMIN_ORDER_REFUND_CONFIRM.format(price=fmt(o["price_usd"] - o.get("refunded_usd", 0)), id=oid)
                       + (T.ADMIN_ORDER_REFUND_NOUR_WARN.format(nour_id=o["nour_id"])
@@ -162,6 +177,14 @@ async def msg_refund(message: Message, state: FSMContext) -> None:
         return
     data = await state.get_data()
     await state.clear()
+    o0 = await repo.get(int(data.get("oid") or 0))
+    if o0 and (o0.get("spec") or {}).get("scheduled_subscription"):
+        # 🛡️ حماية ثانية: حتى لو وصلنا لهنا بزر قديم — لا استرداد عام لطلبات الاشتراكات
+        from app.services import scheduled as SD
+        sid = o0.get("scheduled_subscription_id")
+        _, refund = await SD.cancel(int(sid), admin_id=message.from_user.id)
+        await message.answer(f"↩️ أُلغي SUB-{sid} واستُرد {fmt(refund)} (نسبي بالمتباقي)")
+        return
     try:
         o = await orders_svc.refund(data["oid"], reason=message.text.strip(), new_status="refunded",
                                     admin_id=message.from_user.id, expect=repo.OPEN_STATUSES)

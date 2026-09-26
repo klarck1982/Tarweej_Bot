@@ -202,6 +202,27 @@ def scheduled_after_purchase() -> InlineKeyboardMarkup:
     ])
 
 
+def admin_sub_card(sub_id: int) -> InlineKeyboardMarkup:
+    """بطاقة تحكم الأدمن السريع باشتراك التصميم اليومي."""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [ib("➕ إضافة أزواج", f"adm:sub:{sub_id}:add", "primary"), ib("👁️ الطابور", f"adm:sub:{sub_id}:queue")],
+        [ib("▶️ أرسل التالي الآن", f"adm:sub:{sub_id}:now"), ib("⏸️ إيقاف", f"adm:sub:{sub_id}:pause")],
+        [ib("🖥️ تحكم كامل من Cpanel", "adm:cpanel_hint")],
+    ])
+
+
+def admin_sub_input_bar(sub_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [ib("👁️ الطابور", f"adm:sub:{sub_id}:queue"), ib("✅ تم — إنهاء الإدخال", "adm:sub:done", "success")],
+    ])
+
+
+def admin_pair_bar(sub_id: int, seq: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [ib("🗑️ حذف هذا الزوج", f"adm:sub:{sub_id}:del:{seq}", "danger")],
+    ])
+
+
 # ───────────── B الرصيد والشحن ─────────────
 
 def balance_menu(pending_id: int | None = None, draft_id: int | None = None) -> InlineKeyboardMarkup:
@@ -379,7 +400,12 @@ def admin_back() -> InlineKeyboardMarkup:
 
 
 def admin_scheduled_subscriber(subscription_id: int, cpanel_url: str | None = None) -> InlineKeyboardMarkup:
-    rows = [[ib("📤 إضافة محتوى عبر البوت", f"adm:sub:{subscription_id}:add", "primary")]]
+    rows = [
+        [ib("📤 إضافة أزواج", f"adm:sub:{subscription_id}:add", "primary"),
+         ib("👁️ الطابور", f"adm:sub:{subscription_id}:queue")],
+        [ib("▶️ أرسل التالي الآن", f"adm:sub:{subscription_id}:now"),
+         ib("⏸️ إيقاف", f"adm:sub:{subscription_id}:pause")],
+    ]
     if cpanel_url:
         rows.append([InlineKeyboardButton(text="🖥️ إدارة من Cpanel ↗", web_app=WebAppInfo(url=cpanel_url), style="primary")])
     rows.append([ib("📊 لوحة الإدارة", "adm:panel")])
@@ -725,7 +751,10 @@ def admin_order_card(order: dict, dry_run: bool, media_count: int = 0, in_channe
         rows.append([ib(f"📎 ملفات العميل ({media_count})", f"adm:ord:{oid}:media")])
     rows.append([ib("💬 مراسلة العميل", f"adm:ord:{oid}:msg")])
     if st in ("paid", "submitted", "in_progress", "active", "paused"):
-        rows.append([ib("↩️ استرداد كامل وإغلاق", f"adm:ord:{oid}:refund", "danger")])
+        if (order.get("spec") or {}).get("scheduled_subscription") and order.get("scheduled_subscription_id"):
+            rows.append([ib("↩️ إلغاء الاشتراك واسترداد المتبقي", f"adm:sub:{order['scheduled_subscription_id']}:cancel", "danger")])
+        else:
+            rows.append([ib("↩️ استرداد كامل وإغلاق", f"adm:ord:{oid}:refund", "danger")])
     if not in_channel:
         rows.append([ib("◀️ الطلبات", "adm:orders")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
