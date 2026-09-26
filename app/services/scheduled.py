@@ -366,7 +366,7 @@ async def extend(subscription_id: int, add_count: int, add_price, *, user_id: in
                         "package_title": f"تمديد {sub['package_title']} (+{int(add_count)})",
                         "total_items": int(add_count), "duration_days": int(add_count),
                         "send_time": str(sub.get("send_time") or "20:00")[:5],
-                        "timezone": sub.get("timezone_name") or DEFAULT_TIMEZONE,
+                        "timezone": (sub.get("timezone") or sub.get("timezone_name")) or DEFAULT_TIMEZONE,
                         "include_copy": True}
                 await c.fetchrow(
                     "INSERT INTO orders (user_id, kind, status, spec, price_usd, cost_usd, paid_at, note, checkout_key, scheduled_subscription_id) "
@@ -409,7 +409,7 @@ async def update_sub(subscription_id: int, *, name: str | None = None, send_time
     if note is not None:
         fields["note"] = str(note)[:300]
     if "send_time" in fields and sub["status"] == "scheduled" and not sub.get("missed_slot"):
-        fields["next_send_at"] = first_slot(fields["send_time"], sub.get("timezone_name"))
+        fields["next_send_at"] = first_slot(fields["send_time"], (sub.get("timezone") or sub.get("timezone_name")))
     upd = await repo.update_fields(subscription_id, **fields)
     return await repo.get_subscription(int(upd["id"]))
 
@@ -434,7 +434,7 @@ async def activate(subscription_id: int) -> dict | None:
     upd = await repo.set_status(subscription_id, "scheduled", expect=("awaiting_assets",))
     if not upd:
         raise ValueError("تغيّرت الحالة أثناء التفعيل — أعد المحاولة")
-    nxt = first_slot(str(upd.get("send_time") or "20:00")[:5], upd.get("timezone_name"))
+    nxt = first_slot(str(upd.get("send_time") or "20:00")[:5], (upd.get("timezone") or upd.get("timezone_name")))
     await repo.update_fields(subscription_id, next_send_at=nxt)
     return await repo.get_subscription(subscription_id)
 
@@ -456,7 +456,7 @@ async def resume(subscription_id: int) -> dict | None:
     nsa = sub.get("next_send_at")
     if nsa is None or nsa <= datetime.now(timezone.utc):
         # موعد جديد قادم إن كان الموعد قد فات (أو بلا موعد)
-        fields["next_send_at"] = first_slot(str(sub.get("send_time") or "20:00")[:5], sub.get("timezone_name"))
+        fields["next_send_at"] = first_slot(str(sub.get("send_time") or "20:00")[:5], (sub.get("timezone") or sub.get("timezone_name")))
     if fields:
         await repo.update_fields(subscription_id, **fields)
     return await repo.set_status(subscription_id, "scheduled", expect=("paused",))
@@ -576,7 +576,7 @@ async def add_pair(subscription_id: int, file_kind: str, file_id: str, copy_text
     if sub["status"] == "scheduled":
         nsa = sub.get("next_send_at")
         if nsa is None:
-            fields["next_send_at"] = first_slot(str(sub.get("send_time") or "20:00")[:5], sub.get("timezone_name"), now)
+            fields["next_send_at"] = first_slot(str(sub.get("send_time") or "20:00")[:5], (sub.get("timezone") or sub.get("timezone_name")), now)
         elif nsa <= now:
             # فات الموعد والطابور كان فارغاً ← لحاق فوري مع اعتذار
             fields["missed_slot"] = True
@@ -764,7 +764,7 @@ async def deliver_next(bot, subscription_id: int, *, manual: bool = False) -> tu
         next_at, keep_missed = catchup_slot(now), True     # لحاق: زوج كل ساعة
     else:
         next_at, keep_missed = next_daily_slot(str(sub.get("send_time") or "20:00")[:5],
-                                               sub.get("timezone_name"), now), False
+                                               (sub.get("timezone") or sub.get("timezone_name")), now), False
     updated = await repo.mark_sent(item["id"], subscription_id, missed_chain=keep_missed, next_send_at=next_at)
     mid = getattr(msg, "message_id", None)
     if mid is not None:

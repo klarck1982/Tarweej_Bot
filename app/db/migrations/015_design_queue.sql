@@ -18,14 +18,30 @@ ALTER TABLE scheduled_subscriptions ADD COLUMN IF NOT EXISTS note TEXT;
 -- اشتراكات يدوية بلا حساب بوت
 ALTER TABLE scheduled_subscriptions ALTER COLUMN user_id DROP NOT NULL;
 
--- الأقدم: وجه التسليم = محادثة المستخدم نفسه
-UPDATE scheduled_subscriptions SET target_chat_id = user_id, customer_name = user_name
- WHERE target_chat_id IS NULL;
+-- الأقدم: وجه التسليم = محادثة المستخدم نفسه (user_id)، واسم الزبون من جدول المستخدمين.
+-- (إصلاح 26/09: النسخة السابقة كانت تشير لعمود user_name غير الموجود في هذا الجدول
+--  فكانت تفشل كامل الترحيلة وتمنع إقلاع البوت — راجع سجل Render: UndefinedColumnError)
+UPDATE scheduled_subscriptions SET target_chat_id = user_id
+ WHERE target_chat_id IS NULL AND user_id IS NOT NULL;
 
--- وجه واحد فقط لكل اشتراك نشط — أي محاولة ربط قناة زبونين تفشل بالقاعدة نفسها
-CREATE UNIQUE INDEX IF NOT EXISTS scheduled_subscriptions_active_target_uq
-    ON scheduled_subscriptions(target_chat_id)
-    WHERE status IN ('awaiting_assets','scheduled','paused') AND target_chat_id IS NOT NULL;
+UPDATE scheduled_subscriptions s SET customer_name = u.name
+  FROM users u
+ WHERE s.customer_name IS NULL AND s.user_id IS NOT NULL
+   AND u.tg_id = s.user_id AND COALESCE(u.name, '') <> '';
+
+-- وجه واحد فقط لكل اشتراك نشط — أي محاولة ربط قناة زبونين تفشل بالقاعدة نفسها.
+-- ملاحظة متانة: إن وُجدت صفوف تجريبية مكررة على الوجه نفسه، نكتفي بفهرس عادي
+-- حتى لا يفشل النشر — والحماية تبقى في طبقة التطبيق (active_on_target).
+-- بعد تنظيف التكرار أعد إنشاء الفهرس الفريد يدوياً.
+DO $$ BEGIN
+    CREATE UNIQUE INDEX IF NOT EXISTS scheduled_subscriptions_active_target_uq
+        ON scheduled_subscriptions(target_chat_id)
+        WHERE status IN ('awaiting_assets','scheduled','paused') AND target_chat_id IS NOT NULL;
+EXCEPTION WHEN unique_violation THEN
+    CREATE INDEX IF NOT EXISTS scheduled_subscriptions_active_target_idx
+        ON scheduled_subscriptions(target_chat_id)
+        WHERE status IN ('awaiting_assets','scheduled','paused') AND target_chat_id IS NOT NULL;
+END $$;
 
 -- طابور الأزواج: seq = ترتيب الإرسال (FIFO) يُولَّد تلقائياً عند الإدخال
 CREATE INDEX IF NOT EXISTS scheduled_items_queue_idx
